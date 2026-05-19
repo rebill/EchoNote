@@ -1,0 +1,10 @@
+node_modules/
+dist/
+main.js
+.venv/
+asr-service/.venv/
+
+__pycache__/
+*.py[cod]
+
+.DS_Store

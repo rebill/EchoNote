@@ -1,0 +1,10 @@
+{
+  "id": "echonote",
+  "name": "EchoNote",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Local meeting transcription and AI summaries for Obsidian.",
+  "author": "EchoNote",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}

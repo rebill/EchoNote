@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+echonote_asr/__init__.py
+echonote_asr/__main__.py
+echonote_asr/app.py
+echonote_asr/logging.py
+echonote_asr/model.py
+echonote_asr/schemas.py
+echonote_asr/spike_real_asr.py
+echonote_asr/transcriber.py
+echonote_asr/wav.py
+echonote_asr.egg-info/PKG-INFO
+echonote_asr.egg-info/SOURCES.txt
+echonote_asr.egg-info/dependency_links.txt
+echonote_asr.egg-info/entry_points.txt
+echonote_asr.egg-info/requires.txt
+echonote_asr.egg-info/top_level.txt
