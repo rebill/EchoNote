@@ -16,6 +16,7 @@ from .schemas import (
     ShutdownResponse,
     TranscriptSegment,
 )
+from .text_sanitizer import sanitize_transcript_text
 from .wav import read_valid_wav
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,9 @@ def create_app(default_model: str, version: str = "0.1.0", backend: str = "fake"
 
         segment = TranscriptSegment(
             chunk_id=chunk_id,
-            text=transcript_text if model_state.backend != "fake" else f"fake transcript for chunk {chunk_id}",
+            text=sanitize_transcript_text(
+                transcript_text if model_state.backend != "fake" else f"fake transcript for chunk {chunk_id}"
+            ),
             started_at_ms=started_at_ms,
             ended_at_ms=ended_at_ms,
             language=None if language == "auto" else language,

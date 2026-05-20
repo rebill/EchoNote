@@ -5,6 +5,7 @@ import { formatMeetingTitle, formatTranscriptTimestamp, sanitizeFileName } from 
 import type { MeetingSummary } from "../llm/llm-types";
 import { extractTranscript, replaceSummarySections } from "./markdown-sections";
 import { renderMeetingTemplate } from "./meeting-template";
+import { sanitizeTranscriptText } from "./transcript-sanitizer";
 
 type CreateMeetingOptions = {
   settings: EchoNoteSettings;
@@ -44,7 +45,7 @@ export class MeetingNoteWriter {
 
   async appendTranscript(file: TFile, segment: TranscriptSegment, enableTimestamps: boolean): Promise<void> {
     const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(segment.started_at_ms)}] ` : "";
-    const text = segment.text.trim();
+    const text = sanitizeTranscriptText(segment.text);
     if (!text) {
       return;
     }
