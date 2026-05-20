@@ -176,9 +176,12 @@ For a mixed source containing both your microphone and meeting software output, 
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
 - [Product Requirements](docs/PRD.md)
 - [Technical Design](docs/TECH_DESIGN.md)
 - [Delivery Plan](docs/DELIVERY_PLAN.md)
+- [Release Process](docs/RELEASE.md)
 - [API Contract](docs/API_CONTRACT.md)
 - [M3 Real ASR Spike](docs/M3_REAL_ASR_SPIKE.md)
 - [M6 E2E Test Plan](docs/M6_E2E_TEST_PLAN.md)
