@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="192" y1="128" x2="832" y2="896" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="224" y1="512" x2="800" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a7f3d0"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="28" stdDeviation="36" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <rect x="222" y="216" width="580" height="592" rx="92" fill="#f8fafc"/>
+    <rect x="290" y="296" width="444" height="56" rx="28" fill="#cbd5e1"/>
+    <rect x="290" y="424" width="248" height="56" rx="28" fill="#cbd5e1"/>
+    <rect x="290" y="552" width="348" height="56" rx="28" fill="#cbd5e1"/>
+    <path
+      d="M256 704h82c22 0 36-12 44-34l28-84 58 172c7 22 22 34 43 34s36-12 43-34l78-244 40 122c8 22 22 34 44 34h52"
+      fill="none"
+      stroke="url(#wave)"
+      stroke-width="54"
+      stroke-linecap="round"
+      stroke-linejoin="round"/>
+  </g>
+</svg>

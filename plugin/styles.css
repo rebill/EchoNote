@@ -1,0 +1,356 @@
+.echonote-status-view {
+  --echonote-status-ok: var(--text-success, #248a52);
+  --echonote-status-danger: var(--text-error, #c2410c);
+  --echonote-status-warning: var(--text-warning, #b26b00);
+  box-sizing: border-box;
+  container-type: inline-size;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  color: var(--text-normal);
+}
+
+.echonote-status-view *,
+.echonote-status-view *::before,
+.echonote-status-view *::after {
+  box-sizing: border-box;
+}
+
+.echonote-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-secondary));
+  padding: 12px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.echonote-status-title {
+  min-width: 0;
+}
+
+.echonote-status-title h2 {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 20px;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-kicker {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.echonote-status-pill {
+  flex: 0 1 auto;
+  max-width: 56%;
+  justify-self: end;
+}
+
+.echonote-status-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.echonote-status-summary-item {
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  padding: 8px;
+}
+
+.echonote-status-summary-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.echonote-status-summary-value {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-summary-item.is-success {
+  border-color: color-mix(in srgb, var(--echonote-status-ok) 34%, var(--background-modifier-border));
+}
+
+.echonote-status-summary-item.is-success .echonote-status-summary-value {
+  color: var(--echonote-status-ok);
+}
+
+.echonote-status-summary-item.is-danger {
+  border-color: color-mix(in srgb, var(--echonote-status-danger) 38%, var(--background-modifier-border));
+}
+
+.echonote-status-summary-item.is-danger .echonote-status-summary-value {
+  color: var(--echonote-status-danger);
+}
+
+.echonote-status-summary-item.is-warning {
+  border-color: color-mix(in srgb, var(--echonote-status-warning) 38%, var(--background-modifier-border));
+}
+
+.echonote-status-summary-item.is-warning .echonote-status-summary-value {
+  color: var(--echonote-status-warning);
+}
+
+.echonote-status-list {
+  display: grid;
+  gap: 10px;
+}
+
+.echonote-status-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  padding: 0;
+  overflow: hidden;
+}
+
+.echonote-status-section h3 {
+  margin: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.echonote-status-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 36%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.echonote-status-row:first-of-type {
+  border-top: 0;
+}
+
+.echonote-status-label {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-value {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  justify-self: end;
+  text-align: right;
+}
+
+.echonote-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--background-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.echonote-status-badge::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.echonote-status-code {
+  border-radius: 6px;
+  background: var(--background-secondary);
+  padding: 2px 5px;
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.echonote-status-value.is-success,
+.echonote-status-pill.is-success {
+  color: var(--echonote-status-ok);
+}
+
+.echonote-status-value.is-danger,
+.echonote-status-pill.is-danger {
+  color: var(--echonote-status-danger);
+}
+
+.echonote-status-value.is-warning,
+.echonote-status-pill.is-warning {
+  color: var(--echonote-status-warning);
+}
+
+.echonote-status-value.is-muted,
+.echonote-status-pill.is-muted {
+  color: var(--text-muted);
+}
+
+.echonote-status-error {
+  border: 1px solid var(--background-modifier-error, var(--text-error, #c2410c));
+  border-radius: 8px;
+  background: var(--background-modifier-error-hover, var(--background-secondary));
+  padding: 10px;
+}
+
+.echonote-status-error h3 {
+  margin: 0 0 6px;
+  color: var(--text-error, #c2410c);
+  font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-error p {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-error pre {
+  max-height: 160px;
+  margin: 8px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.echonote-status-actions {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  padding: 8px;
+}
+
+.echonote-status-action-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.echonote-status-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.echonote-status-action-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.echonote-status-action-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.echonote-status-action-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.echonote-status-actions button.echonote-status-action-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.echonote-status-actions button.echonote-status-action-danger {
+  border-color: var(--text-error, #c2410c);
+  color: var(--text-error, #c2410c);
+}
+
+@container (max-width: 280px) {
+  .echonote-status-view {
+    padding: 8px;
+  }
+
+  .echonote-status-header {
+    display: grid;
+  }
+
+  .echonote-status-pill {
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .echonote-status-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .echonote-status-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    align-items: start;
+  }
+
+  .echonote-status-value {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .echonote-status-action-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

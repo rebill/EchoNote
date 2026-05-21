@@ -2,10 +2,10 @@ import { Notice, Platform, TFile } from "obsidian";
 import { AudioRecorder } from "../audio/audio-recorder";
 import type { AudioChunk } from "../audio/audio-types";
 import { concatWavFiles } from "../audio/wav-encoder";
-import { AsrProcessManager } from "../asr/asr-process-manager";
+import { AsrRuntimeResolutionError, resolveAsrRuntime } from "../asr/asr-runtime-resolver";
 import { AsrServiceClient } from "../asr/asr-service-client";
 import type { EchoNoteSettings } from "../settings/settings";
-import { resolveAsrModelId } from "../settings/settings";
+import { createAsrRuntimeStatus, createCompanionResolutionStatus } from "../status/companion-status";
 import type { StatusStore } from "../status/status-store";
 import { createEchoNoteError } from "../utils/errors";
 import { MeetingNoteWriter } from "./meeting-note-writer";
@@ -18,7 +18,6 @@ type MeetingSessionControllerOptions = {
   statusStore: StatusStore;
   audioRecorder: AudioRecorder;
   noteWriter: MeetingNoteWriter;
-  asrProcessManager: AsrProcessManager;
 };
 
 export class MeetingSessionController {
@@ -29,6 +28,7 @@ export class MeetingSessionController {
   private queue: AudioChunk[] = [];
   private processing = false;
   private started = false;
+  private asrClient: AsrServiceClient | null = null;
 
   constructor(private readonly options: MeetingSessionControllerOptions) {}
 
@@ -63,22 +63,23 @@ export class MeetingSessionController {
     }
 
     const settings = this.options.getSettings();
-    const modelId = resolveAsrModelId(settings);
-    const client = this.createClient(settings);
     const startedAt = new Date();
 
     try {
       this.options.statusStore.setState({
         asrService: "starting",
-        model: "loading",
-        selectedModel: modelId,
+        model: "unknown",
         recording: "idle",
         lastError: null
       });
       new Notice("EchoNote: checking ASR service...");
 
-      await this.ensureAsrService(settings, modelId, client);
-      await this.loadModel(client, modelId);
+      const runtime = await resolveAsrRuntime(settings);
+      this.options.statusStore.setState(createAsrRuntimeStatus(settings, runtime));
+      const client = this.createClient(runtime.baseUrl);
+      this.asrClient = client;
+      await this.ensureAsrService(client);
+      const modelId = await this.ensureModelReady(client, runtime.companion.discovery.modelId);
 
       new Notice("EchoNote: creating meeting note...");
       const meetingInfo = await this.options.noteWriter.createMeetingNote({
@@ -108,12 +109,13 @@ export class MeetingSessionController {
     } catch (error) {
       await this.options.audioRecorder.stop();
       this.started = false;
+      this.asrClient = null;
       this.options.statusStore.setState({
+        ...this.createRuntimeFailureStatus(error),
+        asrService: "error",
+        model: "error",
         recording: "error",
-        lastError: createEchoNoteError("ASR_SERVICE_START_FAILED", "Failed to start EchoNote meeting.", {
-          detail: error instanceof Error ? error.message : String(error),
-          recoverable: true
-        })
+        lastError: this.createStartFailureError(error, "Failed to start EchoNote meeting.")
       });
       new Notice(`EchoNote failed to start: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -121,27 +123,27 @@ export class MeetingSessionController {
 
   async startAsrServiceOnly(): Promise<void> {
     const settings = this.options.getSettings();
-    const modelId = resolveAsrModelId(settings);
-    const client = this.createClient(settings);
 
     try {
       this.options.statusStore.setState({
         asrService: "starting",
-        model: "loading",
-        selectedModel: modelId,
+        model: "unknown",
         lastError: null
       });
-      await this.ensureAsrService(settings, modelId, client);
-      await this.loadModel(client, modelId);
-      new Notice("EchoNote ASR service is ready.");
+      const runtime = await resolveAsrRuntime(settings);
+      this.options.statusStore.setState(createAsrRuntimeStatus(settings, runtime));
+      const client = this.createClient(runtime.baseUrl);
+      this.asrClient = client;
+      await this.ensureAsrService(client);
+      await this.ensureModelReady(client, runtime.companion.discovery.modelId);
+      new Notice("EchoNote Companion ASR is ready.");
     } catch (error) {
+      this.asrClient = null;
       this.options.statusStore.setState({
+        ...this.createRuntimeFailureStatus(error),
         asrService: "error",
         model: "error",
-        lastError: createEchoNoteError("ASR_SERVICE_START_FAILED", "Failed to start ASR service.", {
-          detail: error instanceof Error ? error.message : String(error),
-          recoverable: true
-        })
+        lastError: this.createStartFailureError(error, "Failed to start ASR service.")
       });
     }
   }
@@ -180,6 +182,7 @@ export class MeetingSessionController {
     this.meetingFile = null;
     this.meetingTitle = null;
     this.meetingAudioFolder = null;
+    this.asrClient = null;
     this.rawAudioChunks = [];
     this.queue = [];
     this.options.statusStore.setState({
@@ -189,71 +192,44 @@ export class MeetingSessionController {
     new Notice("EchoNote meeting stopped.");
   }
 
-  async restartAsrService(): Promise<void> {
-    await this.options.asrProcessManager.stop();
-    this.options.statusStore.setState({
-      asrService: "not_started",
-      model: "not_loaded",
-      lastError: null
-    });
-  }
-
   getCurrentMeetingFile(): TFile | null {
     return this.meetingFile;
   }
 
-  private async ensureAsrService(
-    settings: EchoNoteSettings,
-    modelId: string,
-    client: AsrServiceClient
-  ): Promise<void> {
+  private async ensureAsrService(client: AsrServiceClient): Promise<void> {
     try {
       await client.health();
       this.options.statusStore.setState({ asrService: "running" });
       return;
     } catch {
-      if (!settings.autoStartAsrService) {
-        throw new Error("ASR service is unavailable and auto-start is disabled.");
-      }
+      throw new Error("Companion ASR runtime is unavailable. Open EchoNote ASR Companion and click Start Service.");
     }
-
-    this.options.asrProcessManager.start(settings, modelId);
-    await this.waitForHealth(client);
-    this.options.statusStore.setState({ asrService: "running" });
   }
 
-  private async waitForHealth(client: AsrServiceClient): Promise<void> {
-    const deadline = Date.now() + 15000;
-    let lastError: unknown = null;
-
-    while (Date.now() < deadline) {
-      try {
-        await client.health();
-        return;
-      } catch (error) {
-        lastError = error;
-        await sleep(500);
-      }
-    }
-
-    throw new Error(`ASR service did not become healthy: ${lastError instanceof Error ? lastError.message : lastError}`);
-  }
-
-  private async loadModel(client: AsrServiceClient, modelId: string): Promise<void> {
-    this.options.statusStore.setState({ model: "loading" });
-    await client.loadModel(modelId);
-
+  private async ensureModelReady(client: AsrServiceClient, fallbackModelId: string): Promise<string> {
     const deadline = Date.now() + 60000;
     let status = await client.modelStatus();
+    let modelId = status.model_id || fallbackModelId;
+
+    if (status.status === "not_loaded") {
+      this.options.statusStore.setState({ model: "loading", selectedModel: modelId });
+      await client.loadModel(modelId);
+      status = await client.modelStatus();
+      modelId = status.model_id || modelId;
+    }
+
     while (status.status === "loading" && Date.now() < deadline) {
+      this.options.statusStore.setState({ model: "loading", selectedModel: modelId });
       await sleep(500);
       status = await client.modelStatus();
+      modelId = status.model_id || modelId;
     }
 
     if (status.status !== "ready") {
       throw new Error(status.error ?? `model is ${status.status}`);
     }
     this.options.statusStore.setState({ model: "ready", selectedModel: modelId });
+    return modelId;
   }
 
   private async enqueueChunk(chunk: AudioChunk): Promise<void> {
@@ -298,8 +274,18 @@ export class MeetingSessionController {
   }
 
   private async processChunk(chunk: AudioChunk, meetingFile: TFile): Promise<void> {
+    const client = this.asrClient;
+    if (!client) {
+      this.options.statusStore.setState({
+        lastError: createEchoNoteError("ASR_COMPANION_UNAVAILABLE", "Companion ASR client is not available.", {
+          detail: "Start the meeting again after EchoNote ASR Companion is running.",
+          recoverable: true
+        })
+      });
+      return;
+    }
+
     const settings = this.options.getSettings();
-    const client = this.createClient(settings);
     try {
       const segment = await client.transcribe(chunk, settings.summaryLanguage === "en" ? "en" : "zh");
       await this.options.noteWriter.appendTranscript(meetingFile, segment, settings.enableTimestamps);
@@ -332,8 +318,30 @@ export class MeetingSessionController {
     await this.options.noteWriter.saveMeetingAudio(audioFolder, meetingTitle, wavBytes);
   }
 
-  private createClient(settings: EchoNoteSettings): AsrServiceClient {
-    return new AsrServiceClient(`http://127.0.0.1:${settings.asrServicePort}`);
+  private createClient(baseUrl: string): AsrServiceClient {
+    return new AsrServiceClient(baseUrl);
+  }
+
+  private createStartFailureError(error: unknown, message: string) {
+    if (error instanceof AsrRuntimeResolutionError) {
+      return createEchoNoteError(error.code, error.message, {
+        detail: error.detail,
+        recoverable: true
+      });
+    }
+
+    return createEchoNoteError("ASR_SERVICE_START_FAILED", message, {
+      detail: error instanceof Error ? error.message : String(error),
+      recoverable: true
+    });
+  }
+
+  private createRuntimeFailureStatus(error: unknown): Partial<ReturnType<StatusStore["getState"]>> {
+    if (error instanceof AsrRuntimeResolutionError) {
+      return createCompanionResolutionStatus(this.options.getSettings(), error.companion);
+    }
+
+    return {};
   }
 }
 

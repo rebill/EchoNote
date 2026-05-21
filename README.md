@@ -6,7 +6,7 @@ MVP scope:
 
 - macOS only.
 - Local ASR with MLX.
-- Default ASR model: `mlx-community/Qwen3-ASR-0.6B-4bit`.
+- Optional macOS ASR Companion in v0.2.0 to start, stop, monitor, and diagnose the local ASR service.
 - Quasi-real-time chunk transcription.
 - Markdown meeting notes in your Obsidian vault.
 - OpenAI-compatible and Anthropic summary providers.
@@ -17,6 +17,7 @@ MVP scope:
 ```text
 plugin/       Obsidian TypeScript plugin
 asr-service/  Local Python ASR service
+companion/    Tauri ASR Companion app, added by the v0.2.0 scaffold task
 docs/         PRD, technical design, test plans, and user guides
 ```
 
@@ -27,6 +28,7 @@ docs/         PRD, technical design, test plans, and user guides
 - Node.js for building the plugin.
 - Python 3.11+.
 - Apple Silicon Mac recommended for MLX.
+- Rust and Tauri prerequisites if building the v0.2.0 Companion from source.
 - Optional: BlackHole or Loopback if you want to record meeting software output.
 
 ## Install ASR Service
@@ -86,6 +88,51 @@ Check service health:
 curl http://127.0.0.1:8765/health
 ```
 
+## ASR Runtime
+
+EchoNote v0.2.0 uses EchoNote ASR Companion as the only ASR backend for the Obsidian plugin. The plugin reads Companion discovery and calls the Companion-managed localhost ASR API; it no longer starts its own Python ASR process.
+
+If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explicit Companion error.
+
+## Run With Companion
+
+The v0.2.0 Companion is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. v0.2.0 is source-only for Companion; no signed `.app` or `.dmg` is published for this release.
+
+Expected workflow:
+
+1. Install the ASR service environment from `Install ASR Service`.
+2. Build and run Companion from source:
+
+```bash
+cd companion
+npm install
+npm run tauri:dev
+```
+
+3. Open EchoNote ASR Companion.
+4. Configure:
+   - Python executable path.
+   - ASR service directory.
+   - Port, usually `8765`.
+   - Backend: `fake` for smoke tests or `mlx-audio` for local ASR.
+   - Model ID.
+5. Click `Start Service`.
+6. Confirm the Companion shows `Service: Running` and writes discovery to:
+
+```text
+~/Library/Application Support/EchoNote/companion.json
+```
+
+Then in Obsidian, open EchoNote Status and confirm Companion status is `available`.
+
+For the release smoke path, run:
+
+```bash
+node scripts/v0_2_0_fake_backend_smoke.mjs
+```
+
+This starts the fake backend, writes a temporary discovery file, verifies the plugin resolves Companion, and verifies legacy Manual settings migrate away from plugin-managed ASR.
+
 ## Build Obsidian Plugin
 
 ```bash
@@ -99,6 +146,7 @@ The build creates:
 ```text
 plugin/main.js
 plugin/manifest.json
+plugin/styles.css
 ```
 
 ## Install Plugin Into A Vault
@@ -110,6 +158,7 @@ mkdir -p "/path/to/TestVault/.obsidian/plugins/echonote"
 
 cp /Users/br/Git/github/rebill/EchoNote/plugin/main.js \
    /Users/br/Git/github/rebill/EchoNote/plugin/manifest.json \
+   /Users/br/Git/github/rebill/EchoNote/plugin/styles.css \
    "/path/to/TestVault/.obsidian/plugins/echonote/"
 ```
 
@@ -124,17 +173,8 @@ Settings → Community plugins → EchoNote → Enable
 Recommended MVP settings:
 
 ```text
-Python path:
-/Users/br/Git/github/rebill/EchoNote/asr-service/.venv/bin/python
-
-ASR service path:
-/Users/br/Git/github/rebill/EchoNote/asr-service
-
-ASR service port:
-8765
-
-ASR model:
-mlx-community/Qwen3-ASR-0.6B-4bit
+Companion discovery path:
+~/Library/Application Support/EchoNote/companion.json
 
 Audio input device:
 Default audio input / BlackHole / Loopback device
@@ -147,15 +187,16 @@ For AI summaries, configure either:
 
 ## Basic Workflow
 
-1. Start the ASR service.
+1. Open EchoNote ASR Companion and click `Start Service`.
 2. Open Obsidian and enable EchoNote.
 3. Open `EchoNote Status`.
-4. Select an audio input device in EchoNote settings.
-5. Click `Start Meeting`.
-6. Speak or play meeting audio.
-7. Click `Stop Meeting`.
-8. Open the generated meeting note under `Meetings/`.
-9. Click `Summarize Meeting`.
+4. Confirm Companion status is `available`.
+5. Select an audio input device in EchoNote settings.
+6. Click `Start Meeting`.
+7. Speak or play meeting audio.
+8. Click `Stop Meeting`.
+9. Open the generated meeting note under `Meetings/`.
+10. Click `Summarize Meeting`.
 
 ## Recording Meeting Software Audio
 

@@ -2,11 +2,11 @@
 
 ## 1. Goal
 
-v0.2.0 的交付目标是让用户可以通过 macOS Companion GUI 启动和诊断本地 ASR service，并让 Obsidian 插件在 `Auto` 模式下优先使用 Companion 管理的 ASR endpoint。
+v0.2.0 的交付目标是让用户可以通过 macOS Companion GUI 启动和诊断本地 ASR service，并让 Obsidian 插件固定使用 Companion 管理的 ASR endpoint。
 
 MVP 截止线：
 
-> 用户打开 Companion，点击 `Start Service`；再打开 Obsidian，`Auto` 模式能发现 Companion 并完成一次 fake backend 转录。
+> 用户打开 Companion，点击 `Start Service`；再打开 Obsidian，插件能发现 Companion 并完成一次 fake backend 转录。
 
 相关文档：
 
@@ -34,30 +34,50 @@ MVP 截止线：
 
 ## 3. Todo List
 
+Claims and ownership:
+
+> Treat any owned issue that is not `Completed` as unavailable for other agents until the owner completes or releases it.
+
+| Issue | Claimed By | Claimed At | Status |
+| --- | --- | --- | --- |
+| [#2](https://github.com/rebill/EchoNote/issues/2) | Codex Dev Agent | 2026-05-21 14:34 CST | Completed 2026-05-21 14:42 CST |
+| [#3](https://github.com/rebill/EchoNote/issues/3) | Codex Dev Agent | 2026-05-21 14:52 CST | Completed 2026-05-21 15:06 CST |
+| [#4](https://github.com/rebill/EchoNote/issues/4) | Codex Dev Agent | 2026-05-21 15:12 CST | Completed 2026-05-21 15:21 CST |
+| [#5](https://github.com/rebill/EchoNote/issues/5) | Codex Dev Agent 2 | 2026-05-21 15:35 CST | Completed 2026-05-21 15:46 CST |
+| [#6](https://github.com/rebill/EchoNote/issues/6) | Codex Dev Agent 2 | 2026-05-21 15:47 CST | Completed 2026-05-21 15:52 CST |
+| [#7](https://github.com/rebill/EchoNote/issues/7) | Codex Dev Agent 2 | 2026-05-21 15:53 CST | Completed 2026-05-21 15:57 CST |
+| [#8](https://github.com/rebill/EchoNote/issues/8) | Codex Dev Agent 2 | 2026-05-21 15:58 CST | Completed 2026-05-21 16:03 CST |
+| [#9](https://github.com/rebill/EchoNote/issues/9) | Codex Dev Agent 2 | 2026-05-21 14:54 CST | Completed 2026-05-21 14:58 CST |
+| [#10](https://github.com/rebill/EchoNote/issues/10) | Codex Dev Agent 2 | 2026-05-21 15:03 CST | Completed 2026-05-21 15:07 CST |
+| [#11](https://github.com/rebill/EchoNote/issues/11) | Codex Dev Agent 2 | 2026-05-21 15:12 CST | Completed 2026-05-21 15:17 CST |
+| [#12](https://github.com/rebill/EchoNote/issues/12) | Codex Dev Agent 2 | 2026-05-21 15:19 CST | Completed 2026-05-21 15:24 CST |
+| [#13](https://github.com/rebill/EchoNote/issues/13) | Codex Dev Agent 2 | 2026-05-21 16:03 CST | Completed 2026-05-21 16:08 CST |
+| [#14](https://github.com/rebill/EchoNote/issues/14) | Codex Dev Agent 2 | 2026-05-21 14:38 CST | Completed 2026-05-21 16:10 CST |
+
 ### Contract
 
-- [ ] [#2](https://github.com/rebill/EchoNote/issues/2) Freeze `companion.json` schema and runtime mode contract.
+- [x] [#2](https://github.com/rebill/EchoNote/issues/2) Freeze `companion.json` schema and runtime mode contract. _(Completed: Codex Dev Agent, 2026-05-21 14:42 CST)_
 
 ### Companion
 
-- [ ] [#3](https://github.com/rebill/EchoNote/issues/3) Scaffold Tauri Companion app.
-- [ ] [#4](https://github.com/rebill/EchoNote/issues/4) Add Companion settings store.
-- [ ] [#5](https://github.com/rebill/EchoNote/issues/5) Add ASR service process manager.
-- [ ] [#6](https://github.com/rebill/EchoNote/issues/6) Add health and model polling.
-- [ ] [#7](https://github.com/rebill/EchoNote/issues/7) Add discovery file writer.
-- [ ] [#8](https://github.com/rebill/EchoNote/issues/8) Add Companion logs and diagnostics.
+- [x] [#3](https://github.com/rebill/EchoNote/issues/3) Scaffold Tauri Companion app. _(Completed: Codex Dev Agent, 2026-05-21 15:06 CST)_
+- [x] [#4](https://github.com/rebill/EchoNote/issues/4) Add Companion settings store. _(Completed: Codex Dev Agent, 2026-05-21 15:21 CST)_
+- [x] [#5](https://github.com/rebill/EchoNote/issues/5) Add ASR service process manager. _(Completed: Codex Dev Agent 2, 2026-05-21 15:46 CST.)_
+- [x] [#6](https://github.com/rebill/EchoNote/issues/6) Add health and model polling. _(Completed: Codex Dev Agent 2, 2026-05-21 15:52 CST.)_
+- [x] [#7](https://github.com/rebill/EchoNote/issues/7) Add discovery file writer. _(Completed: Codex Dev Agent 2, 2026-05-21 15:57 CST.)_
+- [x] [#8](https://github.com/rebill/EchoNote/issues/8) Add Companion logs and diagnostics. _(Completed: Codex Dev Agent 2, 2026-05-21 16:03 CST.)_
 
 ### Plugin
 
-- [ ] [#9](https://github.com/rebill/EchoNote/issues/9) Add plugin ASR runtime mode.
-- [ ] [#10](https://github.com/rebill/EchoNote/issues/10) Add plugin Companion discovery reader.
-- [ ] [#11](https://github.com/rebill/EchoNote/issues/11) Integrate runtime resolver into `MeetingSessionController`.
-- [ ] [#12](https://github.com/rebill/EchoNote/issues/12) Update status panel for Companion state.
+- [x] [#9](https://github.com/rebill/EchoNote/issues/9) Add plugin ASR runtime mode. _(Completed: Codex Dev Agent 2, 2026-05-21 14:58 CST.)_
+- [x] [#10](https://github.com/rebill/EchoNote/issues/10) Add plugin Companion discovery reader. _(Completed: Codex Dev Agent 2, 2026-05-21 15:07 CST.)_
+- [x] [#11](https://github.com/rebill/EchoNote/issues/11) Integrate runtime resolver into `MeetingSessionController`. _(Completed: Codex Dev Agent 2, 2026-05-21 15:17 CST.)_
+- [x] [#12](https://github.com/rebill/EchoNote/issues/12) Update status panel for Companion state. _(Completed: Codex Dev Agent 2, 2026-05-21 15:24 CST.)_
 
 ### Verification And Release
 
-- [ ] [#13](https://github.com/rebill/EchoNote/issues/13) Add fake-backend E2E smoke test.
-- [ ] [#14](https://github.com/rebill/EchoNote/issues/14) Update docs and release checklist for Companion.
+- [x] [#13](https://github.com/rebill/EchoNote/issues/13) Add fake-backend E2E smoke test. _(Completed: Codex Dev Agent 2, 2026-05-21 16:08 CST.)_
+- [x] [#14](https://github.com/rebill/EchoNote/issues/14) Update docs and release checklist for Companion. _(Completed: Codex Dev Agent 2, 2026-05-21 16:10 CST.)_
 
 ## 4. Parallel Development Plan
 
@@ -69,8 +89,8 @@ This issue should finish before implementation branches diverge. It fixes shared
 
 - `companion.json`
 - stale discovery behavior
-- `Auto` / `Companion` / `Manual` runtime semantics
-- plugin fallback rules
+- Companion-only runtime semantics
+- legacy plugin-side ASR fallback migration rules
 
 ### Batch 1: Independent Starts
 
@@ -142,13 +162,13 @@ If one person works sequentially, use this order:
 
 ## 7. Release Readiness Checklist
 
-- [ ] Companion can start fake backend without Terminal.
-- [ ] Companion writes valid `companion.json`.
-- [ ] Plugin `Auto` mode discovers Companion.
-- [ ] Plugin `Manual` mode still works.
-- [ ] Companion logs and diagnostic report are available.
-- [ ] Fake-backend E2E smoke test passes.
-- [ ] README documents Companion and Manual modes.
-- [ ] Troubleshooting documents Companion diagnostics.
-- [ ] `CHANGELOG.md` has v0.2.0 notes.
-- [ ] Release decision is made for Companion artifact: source-only, `.app`, or `.dmg`.
+- [x] Companion can start fake backend without Terminal.
+- [x] Companion writes valid `companion.json`.
+- [x] Plugin discovers Companion as the only ASR runtime.
+- [x] Legacy Manual settings migrate away from plugin-managed ASR and do not resolve to a plugin-side ASR process.
+- [x] Companion logs and diagnostic report are available.
+- [x] Fake-backend E2E smoke test passes.
+- [x] README documents Companion-only ASR runtime.
+- [x] Troubleshooting documents Companion diagnostics.
+- [x] `CHANGELOG.md` has v0.2.0 notes.
+- [x] Release decision is made for Companion artifact: v0.2.0 is source-only; do not attach an unsigned `.app` or `.dmg`.

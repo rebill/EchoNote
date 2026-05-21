@@ -17,9 +17,63 @@ curl http://127.0.0.1:8765/health
 
 If this works in terminal but Obsidian still shows `Failed to fetch`, restart the ASR service and make sure the current code includes CORS middleware.
 
+## Companion is not discovered
+
+The Obsidian plugin uses Companion only when the discovery file is present, valid, fresh, and points to a healthy localhost ASR service. There is no plugin-side Manual fallback.
+
+Check the discovery file:
+
+```bash
+cat "$HOME/Library/Application Support/EchoNote/companion.json"
+```
+
+Then check the discovered ASR endpoint:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Common causes:
+
+- EchoNote ASR Companion is not open.
+- The Companion service is not `running`.
+- `updatedAt` is older than 30 seconds.
+- The ASR service is running on a different port than the plugin expects.
+- The discovery file contains an invalid `baseUrl`, `host`, or `port`.
+
+## Companion shows unavailable, stale, or invalid discovery
+
+EchoNote requires a usable Companion-managed endpoint.
+
+Use Companion first:
+
+1. Click `Start Service`.
+2. Wait for `Service: Running`.
+3. Confirm the API URL is `http://127.0.0.1:<port>`.
+4. Click `Copy Diagnostic Report` if the service enters `Error`.
+
+Logs are expected at:
+
+```text
+~/Library/Logs/EchoNote/companion.log
+~/Library/Logs/EchoNote/asr-service.log
+```
+
+If the discovery file is stale, restart Companion or click `Restart Service`. If discovery is invalid, delete the stale file only after Companion is closed, then start Companion again:
+
+```bash
+rm "$HOME/Library/Application Support/EchoNote/companion.json"
+```
+
+## Companion diagnostics are needed for an issue
+
+In EchoNote ASR Companion, click `Copy Diagnostic Report` and paste the Markdown report into the GitHub issue.
+
+The report should include service status, model status, backend, model ID, base URL, Python path, ASR service path, last exit code, and recent logs. It should not include API keys, LLM tokens, transcript text, or audio content.
+
 ## Python path error
 
-Use an absolute Python path in EchoNote settings:
+Use an absolute Python path in EchoNote ASR Companion settings:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service/.venv/bin/python
@@ -29,7 +83,7 @@ Do not rely on `python3` unless you know Obsidian can resolve the same shell env
 
 ## ASR service path error
 
-Use an absolute ASR service path:
+Use an absolute ASR service path in EchoNote ASR Companion settings:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service
@@ -155,4 +209,3 @@ Check:
 - The meeting note contains a non-empty `## Transcript` section.
 
 EchoNote does not write summary sections if the LLM response cannot be parsed as JSON.
-
