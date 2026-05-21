@@ -71,7 +71,7 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 {
   "status": "ok",
   "service": "echonote-asr",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
 ```
 

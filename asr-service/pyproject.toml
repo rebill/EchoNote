@@ -1,6 +1,6 @@
 [project]
 name = "echonote-asr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local ASR service contracts for EchoNote."
 readme = "README.md"
 requires-python = ">=3.11"

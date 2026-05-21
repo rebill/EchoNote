@@ -1,6 +1,6 @@
 [package]
 name = "echonote-companion"
-version = "0.2.0"
+version = "0.3.0"
 description = "EchoNote ASR Companion desktop app."
 authors = ["EchoNote Contributors"]
 edition = "2021"

@@ -30,7 +30,7 @@ npm run typecheck
 
 ## ASR Runtime
 
-v0.2.0 uses EchoNote ASR Companion as the only ASR backend. The Obsidian plugin no longer starts or restarts its own Python ASR process.
+EchoNote uses EchoNote ASR Companion as the only ASR backend. The Obsidian plugin no longer starts or restarts its own Python ASR process.
 
 The default discovery file is:
 

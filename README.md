@@ -6,7 +6,7 @@ MVP scope:
 
 - macOS only.
 - Local ASR with MLX.
-- Optional macOS ASR Companion in v0.2.0 to start, stop, monitor, and diagnose the local ASR service.
+- Optional macOS ASR Companion to start, stop, monitor, and diagnose the local ASR service.
 - Quasi-real-time chunk transcription.
 - Markdown meeting notes in your Obsidian vault.
 - OpenAI-compatible and Anthropic summary providers.
@@ -17,7 +17,7 @@ MVP scope:
 ```text
 plugin/       Obsidian TypeScript plugin
 asr-service/  Local Python ASR service
-companion/    Tauri ASR Companion app, added by the v0.2.0 scaffold task
+companion/    Tauri ASR Companion app
 docs/         PRD, technical design, test plans, and user guides
 ```
 
@@ -28,7 +28,7 @@ docs/         PRD, technical design, test plans, and user guides
 - Node.js for building the plugin.
 - Python 3.11+.
 - Apple Silicon Mac recommended for MLX.
-- Rust and Tauri prerequisites if building the v0.2.0 Companion from source.
+- Rust and Tauri prerequisites if building Companion from source.
 - Optional: BlackHole or Loopback if you want to record meeting software output.
 
 ## Install ASR Service
@@ -90,13 +90,13 @@ curl http://127.0.0.1:8765/health
 
 ## ASR Runtime
 
-EchoNote v0.2.0 uses EchoNote ASR Companion as the only ASR backend for the Obsidian plugin. The plugin reads Companion discovery and calls the Companion-managed localhost ASR API; it no longer starts its own Python ASR process.
+EchoNote uses EchoNote ASR Companion as the only ASR backend for the Obsidian plugin. The plugin reads Companion discovery and calls the Companion-managed localhost ASR API; it no longer starts its own Python ASR process.
 
 If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explicit Companion error.
 
 ## Run With Companion
 
-The v0.2.0 Companion is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. v0.2.0 is source-only for Companion; no signed `.app` or `.dmg` is published for this release.
+The Companion is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. Companion is source-only; no signed `.app` or `.dmg` is published for this release.
 
 Expected workflow:
 

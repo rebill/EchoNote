@@ -9,8 +9,8 @@ Confirm the version is consistent in:
 - `plugin/manifest.json`
 - `plugin/package.json`
 - `asr-service/pyproject.toml`
-- `companion/package.json`, when the v0.2.0 Companion app is included
-- `companion/src-tauri/Cargo.toml`, when the v0.2.0 Companion app is included
+- `companion/package.json`, when the Companion app is included
+- `companion/src-tauri/Cargo.toml`, when the Companion app is included
 - `versions.json`
 - `CHANGELOG.md`
 
@@ -38,14 +38,14 @@ cd asr-service
 .venv/bin/python -m unittest discover -s tests
 ```
 
-For v0.2.0 Companion releases, run Companion checks from `companion/`:
+For Companion releases, run Companion checks from `companion/`:
 
 ```bash
 npm install
 npm run tauri:build
 ```
 
-Run the v0.2.0 fake-backend smoke test from the repository root:
+Run the fake-backend smoke test from the repository root:
 
 ```bash
 node scripts/v0_2_0_fake_backend_smoke.mjs
@@ -53,7 +53,7 @@ node scripts/v0_2_0_fake_backend_smoke.mjs
 
 This verifies ASR fake backend health/model/transcription, Companion discovery shape, Companion-only plugin runtime resolution, and legacy Manual settings migration away from plugin-managed ASR.
 
-v0.2.0 Companion is source-only. Record that decision in the release notes and skip attaching `.app` or `.dmg` artifacts unless a signed and verified binary is produced in a later release.
+Companion is source-only. Record that decision in the release notes and skip attaching `.app` or `.dmg` artifacts unless a signed and verified binary is produced in a later release.
 
 ## 3. Package
 
@@ -78,7 +78,7 @@ The release should include:
 - `dist/echonote/styles.css`
 - `dist/echonote/README.md`
 
-For v0.2.0 Companion, use the source-only artifact decision before creating the GitHub release:
+For Companion, use the source-only artifact decision before creating the GitHub release:
 
 | Decision | Release assets |
 | --- | --- |
@@ -114,7 +114,7 @@ gh release create vX.Y.Z \
 
 For a more concise release body, copy only the matching version section from `CHANGELOG.md`.
 
-For v0.2.0, the release body must also state:
+For Companion releases, the release body must also state:
 
 - That the Obsidian plugin uses Companion as its only ASR runtime.
 - Whether Companion is source-only, `.app`, or `.dmg`.

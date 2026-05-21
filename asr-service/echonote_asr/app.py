@@ -22,7 +22,7 @@ from .wav import read_valid_wav
 logger = logging.getLogger(__name__)
 
 
-def create_app(default_model: str, version: str = "0.2.0", backend: str = "fake") -> FastAPI:
+def create_app(default_model: str, version: str = "0.3.0", backend: str = "fake") -> FastAPI:
     app = FastAPI(title="EchoNote ASR Service", version=version)
     app.add_middleware(
         CORSMiddleware,
