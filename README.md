@@ -181,6 +181,7 @@ For a mixed source containing both your microphone and meeting software output, 
 - [Product Requirements](docs/PRD.md)
 - [v0.2.0 Tauri ASR Companion PRD](docs/V0_2_0_TAURI_COMPANION_PRD.md)
 - [v0.2.0 Tauri ASR Companion Technical Design](docs/V0_2_0_TAURI_COMPANION_TECH_DESIGN.md)
+- [v0.2.0 Tauri ASR Companion Tasks](docs/V0_2_0_TAURI_COMPANION_TASKS.md)
 - [Technical Design](docs/TECH_DESIGN.md)
 - [Delivery Plan](docs/DELIVERY_PLAN.md)
 - [Release Process](docs/RELEASE.md)
