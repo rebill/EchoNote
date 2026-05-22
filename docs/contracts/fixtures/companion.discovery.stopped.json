@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "app": "EchoNote ASR Companion",
+  "app": "EchoNote",
   "service": "echonote-asr",
   "status": "stopped",
   "baseUrl": "http://127.0.0.1:8765",

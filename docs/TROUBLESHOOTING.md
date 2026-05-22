@@ -17,9 +17,9 @@ curl http://127.0.0.1:8765/health
 
 If this works in terminal but Obsidian still shows `Failed to fetch`, restart the ASR service and make sure the current code includes CORS middleware.
 
-## Companion is not discovered
+## EchoNote desktop is not discovered
 
-The Obsidian plugin uses Companion only when the discovery file is present, valid, fresh, and points to a healthy localhost ASR service. There is no plugin-side Manual fallback.
+The Obsidian plugin uses EchoNote desktop only when the discovery file is present, valid, fresh, and points to a healthy localhost ASR service. There is no plugin-side Manual fallback.
 
 Check the discovery file:
 
@@ -35,22 +35,23 @@ curl http://127.0.0.1:8765/health
 
 Common causes:
 
-- EchoNote ASR Companion is not open.
-- The Companion service is not `running`.
+- EchoNote is not open.
+- The desktop service is not `running`.
 - `updatedAt` is older than 30 seconds.
 - The ASR service is running on a different port than the plugin expects.
 - The discovery file contains an invalid `baseUrl`, `host`, or `port`.
 
-## Companion shows unavailable, stale, or invalid discovery
+## EchoNote shows unavailable, stale, or invalid discovery
 
-EchoNote requires a usable Companion-managed endpoint.
+EchoNote requires a usable desktop-managed endpoint.
 
-Use Companion first:
+Use EchoNote desktop first:
 
-1. Click `Start Service`.
+1. Click `Set Up EchoNote` on first run, or `Start Service` when setup is ready.
 2. Wait for `Service: Running`.
 3. Confirm the API URL is `http://127.0.0.1:<port>`.
-4. Click `Copy Diagnostic Report` if the service enters `Error`.
+4. Open `Advanced Settings` only if Python path, ASR service path, port, backend, or model ID needs manual repair.
+5. Click `Copy Diagnostic Report` if the service enters `Error`.
 
 Logs are expected at:
 
@@ -59,21 +60,21 @@ Logs are expected at:
 ~/Library/Logs/EchoNote/asr-service.log
 ```
 
-If the discovery file is stale, restart Companion or click `Restart Service`. If discovery is invalid, delete the stale file only after Companion is closed, then start Companion again:
+If the discovery file is stale, open EchoNote and click `Restart Service`. If discovery is invalid, delete the stale file only after EchoNote is closed, then start EchoNote again:
 
 ```bash
 rm "$HOME/Library/Application Support/EchoNote/companion.json"
 ```
 
-## Companion diagnostics are needed for an issue
+## Setup or desktop diagnostics are needed for an issue
 
-In EchoNote ASR Companion, click `Copy Diagnostic Report` and paste the Markdown report into the GitHub issue.
+In EchoNote, click `Copy Diagnostic Report` and paste the Markdown report into the GitHub issue.
 
-The report should include service status, model status, backend, model ID, base URL, Python path, ASR service path, last exit code, and recent logs. It should not include API keys, LLM tokens, transcript text, or audio content.
+The report should include setup step summaries, Python candidate summaries, service status, model status, backend, model ID, base URL, Python path, ASR service path, last exit code, and recent logs. It should not include API keys, LLM tokens, transcript text, or audio content.
 
 ## Python path error
 
-Use an absolute Python path in EchoNote ASR Companion settings:
+Most users should click `Repair EchoNote`. If manual repair is needed, open `Advanced Settings` and use an absolute Python path:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service/.venv/bin/python
@@ -83,7 +84,7 @@ Do not rely on `python3` unless you know Obsidian can resolve the same shell env
 
 ## ASR service path error
 
-Use an absolute ASR service path in EchoNote ASR Companion settings:
+Most users should click `Repair EchoNote`. If manual repair is needed, open `Advanced Settings` and use an absolute ASR service path:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service

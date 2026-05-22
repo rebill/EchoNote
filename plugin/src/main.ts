@@ -191,11 +191,11 @@ export default class EchoNotePlugin extends Plugin {
     this.statusStore.setState(createCompanionResolutionStatus(this.settings, resolution));
 
     if (resolution.kind === "available") {
-      new Notice("EchoNote Companion is available.");
+      new Notice("EchoNote desktop runtime is available.");
       return;
     }
 
-    new Notice(`EchoNote Companion status: ${resolution.kind}`);
+    new Notice(`EchoNote desktop runtime status: ${resolution.kind}`);
   }
 
   private async summarizeMeeting(): Promise<void> {

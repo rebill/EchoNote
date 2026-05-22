@@ -8,6 +8,7 @@ node scripts/v0_2_0_fake_backend_smoke.mjs
 
 The script:
 
+- validates the v0.3.0 setup API fallback response contract and setup fixtures;
 - starts the Python ASR service with `--backend fake` on a free localhost port;
 - verifies `/health`, `/model/load`, `/model/status`, and `/transcribe`;
 - writes a temporary v1 `companion.json`;
@@ -23,8 +24,8 @@ ECHONOTE_ASR_PYTHON=/path/to/python node scripts/v0_2_0_fake_backend_smoke.mjs
 
 Manual Obsidian smoke path:
 
-1. Start EchoNote ASR Companion with backend `fake`.
-2. Confirm Companion shows service `Running` and writes `~/Library/Application Support/EchoNote/companion.json`.
+1. Open EchoNote and click `Set Up EchoNote`.
+2. Confirm EchoNote shows service `Running` and writes `~/Library/Application Support/EchoNote/companion.json`.
 3. Open the Obsidian EchoNote status panel and confirm Companion status is `available`.
 4. Start a short meeting and stop it after one chunk.
 5. Confirm the transcript contains `fake transcript for chunk`.

@@ -43,7 +43,7 @@ export function createCompanionResolutionStatus(
       ...baseStatus,
       companionStatus: "available",
       companionApiUrl: resolution.baseUrl,
-      companionMessage: "Companion ASR endpoint is available.",
+      companionMessage: "EchoNote desktop ASR endpoint is available.",
       model: toPluginModelStatus(resolution.discovery.modelStatus),
       selectedModel: resolution.discovery.modelId
     };
@@ -59,18 +59,18 @@ export function createCompanionResolutionStatus(
 
 function buildCompanionMessage(resolution: Exclude<CompanionResolution, { kind: "available" }>): string {
   if (resolution.kind === "missing") {
-    return `${resolution.reason} Open EchoNote ASR Companion and click Start Service.`;
+    return `${resolution.reason} Open EchoNote and click Set Up EchoNote or Start Service.`;
   }
   if (resolution.kind === "stale") {
-    return `${resolution.reason} Restart Companion or click Restart Service in Companion.`;
+    return `${resolution.reason} Open EchoNote and click Restart Service.`;
   }
   if (resolution.kind === "invalid") {
-    return `${resolution.reason} Restart Companion or delete the stale discovery file after closing Companion.`;
+    return `${resolution.reason} Open EchoNote and click Set Up EchoNote, or delete the stale discovery file after closing EchoNote.`;
   }
   if (resolution.kind === "not_running") {
-    return `${resolution.reason} Open Companion and click Start Service.`;
+    return `${resolution.reason} Open EchoNote and click Start Service.`;
   }
-  return `${resolution.reason} Check that Companion is running and the ASR service passes /health.`;
+  return `${resolution.reason} Check that EchoNote is running and the ASR service passes /health.`;
 }
 
 function toPluginModelStatus(status: string): ModelStatus {

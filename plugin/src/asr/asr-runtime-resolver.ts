@@ -50,7 +50,7 @@ export async function resolveAsrRuntime(
 
   throw new AsrRuntimeResolutionError(
     getCompanionErrorCode(companion),
-    "EchoNote Companion is unavailable.",
+    "EchoNote desktop runtime is unavailable.",
     companion
   );
 }

@@ -199,7 +199,7 @@ type CompanionModelStatus =
 
 type CompanionDiscovery = {
   version: 1;
-  app: "EchoNote ASR Companion";
+  app: "EchoNote";
   service: "echonote-asr";
   status: CompanionServiceStatus;
   baseUrl: string;
@@ -218,7 +218,7 @@ type CompanionDiscovery = {
 | 字段 | 规则 |
 | --- | --- |
 | `version` | 固定为 `1`。不兼容变更必须升级版本号。 |
-| `app` | 固定为 `EchoNote ASR Companion`。 |
+| `app` | 固定为 `EchoNote`。 |
 | `service` | 固定为 `echonote-asr`。 |
 | `status` | Companion 管理的 ASR service 状态。插件只有在 `running` 时才可使用 `baseUrl`。 |
 | `baseUrl` | 固定格式为 `http://127.0.0.1:<port>`，不得包含 path、query 或 trailing slash。 |
@@ -271,7 +271,7 @@ type CompanionResolution =
 
 ## 6. ASR Runtime 契约
 
-v0.2.0 插件只保留 Companion ASR runtime。ASR service 的启动、停止、重启和日志由 EchoNote ASR Companion 管理，Obsidian 插件不再启动 Python ASR 进程。
+v0.2.0 插件只保留 Companion ASR runtime。ASR service 的启动、停止、重启和日志由 EchoNote 桌面应用管理，Obsidian 插件不再启动 Python ASR 进程。
 
 ```ts
 type AsrRuntimeMode = "companion";

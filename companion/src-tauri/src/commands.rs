@@ -2,6 +2,8 @@ use crate::discovery::DiscoveryWriter;
 use crate::logs::{diagnostic_report, LogStore};
 use crate::process::ProcessManagerState;
 use crate::settings::{CompanionSettings, SettingsResponse, SettingsStore};
+use crate::setup;
+use crate::setup_types::SetupResponse;
 use crate::state::CompanionAppState;
 
 #[tauri::command]
@@ -108,6 +110,38 @@ pub fn copy_diagnostic_report(
 #[tauri::command]
 pub fn open_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
     LogStore::new(&app)?.open_logs_folder()
+}
+
+#[tauri::command]
+pub fn detect_setup(
+    app: tauri::AppHandle,
+    process_manager: tauri::State<'_, ProcessManagerState>,
+) -> Result<SetupResponse, String> {
+    setup::detect_setup(app, process_manager)
+}
+
+#[tauri::command]
+pub fn install_or_repair_runtime(
+    app: tauri::AppHandle,
+    process_manager: tauri::State<'_, ProcessManagerState>,
+) -> Result<SetupResponse, String> {
+    setup::install_or_repair_runtime(app, process_manager)
+}
+
+#[tauri::command]
+pub fn start_service_with_defaults(
+    app: tauri::AppHandle,
+    process_manager: tauri::State<'_, ProcessManagerState>,
+) -> Result<SetupResponse, String> {
+    setup::start_service_with_defaults(app, process_manager)
+}
+
+#[tauri::command]
+pub fn reset_setup(
+    app: tauri::AppHandle,
+    process_manager: tauri::State<'_, ProcessManagerState>,
+) -> Result<SetupResponse, String> {
+    setup::reset_setup(app, process_manager)
 }
 
 fn current_app_state(

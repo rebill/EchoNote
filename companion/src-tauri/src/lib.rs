@@ -1,8 +1,13 @@
 mod commands;
 mod discovery;
 mod logs;
+mod path_resolver;
 mod process;
 mod settings;
+mod setup;
+mod setup_detector;
+mod setup_installer;
+mod setup_types;
 mod state;
 
 use tauri::{Manager, RunEvent};
@@ -19,10 +24,14 @@ pub fn run() {
             commands::restart_service,
             commands::load_model,
             commands::copy_diagnostic_report,
-            commands::open_logs_folder
+            commands::open_logs_folder,
+            commands::detect_setup,
+            commands::install_or_repair_runtime,
+            commands::start_service_with_defaults,
+            commands::reset_setup
         ])
         .build(tauri::generate_context!())
-        .expect("error while running EchoNote ASR Companion");
+        .expect("error while running EchoNote");
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {

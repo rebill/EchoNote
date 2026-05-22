@@ -5,7 +5,10 @@ import {
   type CompanionSettings,
   type SettingsResponse
 } from "./settings";
+import type { SetupResponse } from "./setup";
 import { DEFAULT_COMPANION_STATE, type CompanionAppState } from "./state";
+
+const FALLBACK_SETTINGS_STORAGE_KEY = "echonote-settings";
 
 declare global {
   interface Window {
@@ -31,7 +34,7 @@ export async function getCompanionAppState(): Promise<CompanionAppState> {
       ...DEFAULT_COMPANION_STATE,
       serviceStatus: "error",
       lastError: error instanceof Error ? error.message : String(error),
-      recentLogs: ["Failed to read Companion app state from Tauri."]
+      recentLogs: ["Failed to read EchoNote app state from Tauri."]
     };
   }
 }
@@ -51,7 +54,7 @@ export async function saveCompanionSettings(settings: CompanionSettings): Promis
   const normalized = normalizeSettings(settings);
 
   if (!canInvokeTauri()) {
-    window.localStorage.setItem("echonote-companion-settings", JSON.stringify(normalized));
+    window.localStorage.setItem(FALLBACK_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
     return {
       ...DEFAULT_SETTINGS_RESPONSE,
       settings: normalized
@@ -59,6 +62,40 @@ export async function saveCompanionSettings(settings: CompanionSettings): Promis
   }
 
   return invoke<SettingsResponse>("save_settings", { settings: normalized });
+}
+
+export async function detectSetup(): Promise<SetupResponse> {
+  if (!canInvokeTauri()) {
+    return setupFallback(getFallbackSettings());
+  }
+
+  return invoke<SetupResponse>("detect_setup");
+}
+
+export async function installOrRepairRuntime(): Promise<SetupResponse> {
+  if (!canInvokeTauri()) {
+    return setupFallback(getFallbackSettings(), "error", "Setup requires the Tauri desktop runtime.");
+  }
+
+  return invoke<SetupResponse>("install_or_repair_runtime");
+}
+
+export async function startServiceWithDefaults(): Promise<SetupResponse> {
+  if (!canInvokeTauri()) {
+    return setupFallback(getFallbackSettings(), "error", "Start Service requires the Tauri desktop runtime.");
+  }
+
+  return invoke<SetupResponse>("start_service_with_defaults");
+}
+
+export async function resetSetup(): Promise<SetupResponse> {
+  if (!canInvokeTauri()) {
+    const settings = DEFAULT_COMPANION_SETTINGS;
+    window.localStorage.setItem(FALLBACK_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    return setupFallback(settings, "not_configured", "Set up EchoNote to use local transcription.");
+  }
+
+  return invoke<SetupResponse>("reset_setup");
 }
 
 export async function startCompanionService(): Promise<CompanionAppState> {
@@ -115,7 +152,7 @@ function canInvokeTauri(): boolean {
 
 function getFallbackSettings(): CompanionSettings {
   try {
-    const raw = window.localStorage.getItem("echonote-companion-settings");
+    const raw = window.localStorage.getItem(FALLBACK_SETTINGS_STORAGE_KEY);
     if (!raw) {
       return DEFAULT_COMPANION_SETTINGS;
     }
@@ -143,7 +180,10 @@ function normalizeSettings(settings: CompanionSettings): CompanionSettings {
     backend: settings.backend,
     modelPreset,
     customModelId: settings.customModelId.trim(),
-    autoStartService: settings.autoStartService
+    autoStartService: Boolean(settings.autoStartService),
+    setupCompletedAt: settings.setupCompletedAt ?? null,
+    setupVersion: settings.setupVersion?.trim() || null,
+    autoRepairEnabled: Boolean(settings.autoRepairEnabled)
   };
 }
 
@@ -167,5 +207,54 @@ function serviceControlFallback(action: string): CompanionAppState {
     backend: settings.backend,
     lastError: `${action} requires the Tauri desktop runtime.`,
     recentLogs: [`${action} is unavailable in browser preview mode.`]
+  };
+}
+
+function setupFallback(
+  settings: CompanionSettings,
+  status: SetupResponse["status"] = "not_configured",
+  message = "Browser preview mode can show the setup flow, but setup actions require the Tauri desktop runtime."
+): SetupResponse {
+  const state: CompanionAppState = {
+    ...DEFAULT_COMPANION_STATE,
+    baseUrl: `http://127.0.0.1:${settings.preferredPort}`,
+    resolvedModelId: resolveModelId(settings),
+    backend: settings.backend,
+    lastError: status === "error" ? message : null,
+    recentLogs: ["Setup preview loaded."]
+  };
+
+  return {
+    status,
+    settings,
+    state,
+    primaryAction: status === "error" ? "retry" : "setup",
+    message,
+    steps: [
+      {
+        id: "system",
+        label: "Check System",
+        status: "passed",
+        summary: "Setup flow preview is available.",
+        detail: null,
+        recoverable: false
+      },
+      {
+        id: "python",
+        label: "Find Python",
+        status: "pending",
+        summary: "Desktop runtime required for local checks.",
+        detail: null,
+        recoverable: true
+      },
+      {
+        id: "runtime",
+        label: "Prepare ASR Runtime",
+        status: "pending",
+        summary: "Desktop runtime required for setup.",
+        detail: null,
+        recoverable: true
+      }
+    ]
   };
 }

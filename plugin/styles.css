@@ -316,9 +316,23 @@
   color: var(--text-on-accent);
 }
 
+.echonote-status-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.echonote-status-actions button.echonote-status-action-active:not(:disabled) {
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb, 126, 87, 194), 0.22);
+}
+
 .echonote-status-actions button.echonote-status-action-danger {
   border-color: var(--text-error, #c2410c);
   color: var(--text-error, #c2410c);
+}
+
+.echonote-status-actions button.echonote-status-action-danger.echonote-status-action-active:not(:disabled) {
+  background-color: rgba(194, 65, 12, 0.12);
+  box-shadow: 0 0 0 2px rgba(194, 65, 12, 0.18);
 }
 
 @container (max-width: 280px) {

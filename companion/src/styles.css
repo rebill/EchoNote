@@ -36,6 +36,173 @@ button {
   padding: 32px 0 40px;
 }
 
+.setup-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.setup-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 132px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  box-shadow: 0 12px 30px rgba(31, 41, 55, 0.07);
+  padding: 22px;
+}
+
+.setup-hero-running {
+  border-color: #9ed8bd;
+  background: #f3fbf6;
+}
+
+.setup-hero-repair_required,
+.setup-hero-error,
+.setup-hero-unsupported {
+  border-color: #e4a29e;
+  background: #fff7f6;
+}
+
+.setup-hero-copy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.setup-message {
+  max-width: 680px;
+  color: #4b5567;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.setup-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.setup-primary {
+  min-width: 150px;
+}
+
+.setup-primary:disabled,
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.setup-progress-panel {
+  min-height: 0;
+}
+
+.setup-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 86px;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 12px;
+}
+
+.setup-step-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.setup-step-body {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.setup-step-body strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.setup-step-body span {
+  color: #607086;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.setup-step-body code {
+  color: #8f2923;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.setup-step-passed .setup-step-marker {
+  border-color: #8fc9ad;
+  background: #eaf8f0;
+  color: #116846;
+}
+
+.setup-step-running .setup-step-marker,
+.setup-step-warning .setup-step-marker {
+  border-color: #e0bd74;
+  background: #fff7e6;
+  color: #8a5a0a;
+}
+
+.setup-step-failed .setup-step-marker {
+  border-color: #e4a29e;
+  background: #fff0ef;
+  color: #9f2c25;
+}
+
+.setup-grid {
+  align-items: start;
+}
+
+.advanced-settings {
+  min-height: 0;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: #18202f;
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.advanced-settings-description {
+  margin-top: 12px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .top-bar {
   display: flex;
   align-items: end;
@@ -433,8 +600,21 @@ h2 {
   }
 
   .status-band,
-  .workspace-grid {
+  .workspace-grid,
+  .setup-steps {
     grid-template-columns: 1fr;
+  }
+
+  .setup-hero {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .setup-hero-actions,
+  .settings-footer {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
   }
 
   .key-value {

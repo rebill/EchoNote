@@ -1,14 +1,14 @@
 [package]
-name = "echonote-companion"
+name = "echonote"
 version = "0.3.0"
-description = "EchoNote ASR Companion desktop app."
+description = "EchoNote desktop app for ASR runtime management."
 authors = ["EchoNote Contributors"]
 edition = "2021"
 rust-version = "1.77"
 build = "build.rs"
 
 [lib]
-name = "echonote_companion_lib"
+name = "echonote_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

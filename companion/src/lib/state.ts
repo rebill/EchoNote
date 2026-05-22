@@ -28,8 +28,8 @@ export const DEFAULT_COMPANION_STATE: CompanionAppState = {
   lastError: null,
   lastExitCode: null,
   recentLogs: [
-    "Companion UI scaffold loaded.",
-    "Service process management will be added in a follow-up task."
+    "EchoNote setup dashboard loaded.",
+    "Local ASR service is ready to be configured."
   ],
   discoveryPath: "~/Library/Application Support/EchoNote/companion.json",
   settingsPath: "~/Library/Application Support/EchoNote/companion-settings.json",

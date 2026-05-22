@@ -8,6 +8,7 @@ import {
 
 type SettingsPanelOptions = {
   onSave: (settings: CompanionSettings) => Promise<void>;
+  onReset?: () => void | Promise<void>;
 };
 
 export function createSettingsPanel(
@@ -36,6 +37,12 @@ export function createSettingsPanel(
 
   const footer = createElement("div", "settings-footer");
   footer.append(createElement("span", "settings-path", response.settingsPath));
+  if (options.onReset) {
+    const resetButton = createElement("button", "secondary-button", "Reset to Defaults");
+    resetButton.type = "button";
+    resetButton.addEventListener("click", () => void options.onReset?.());
+    footer.append(resetButton);
+  }
   const saveButton = createElement("button", "primary-button", "Save Settings");
   saveButton.type = "submit";
   footer.append(saveButton);
@@ -44,7 +51,7 @@ export function createSettingsPanel(
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const settings = readSettings(formData);
+    const settings = readSettings(formData, response.settings);
     void options.onSave(settings);
   });
 
@@ -56,7 +63,7 @@ export function createSettingsPanel(
   return panel;
 }
 
-function readSettings(formData: FormData): CompanionSettings {
+function readSettings(formData: FormData, current: CompanionSettings): CompanionSettings {
   const preferredPort = Number.parseInt(String(formData.get("preferredPort") ?? ""), 10);
 
   return {
@@ -70,7 +77,10 @@ function readSettings(formData: FormData): CompanionSettings {
       DEFAULT_COMPANION_SETTINGS.modelPreset
     ) as CompanionModelPreset,
     customModelId: readString(formData, "customModelId", ""),
-    autoStartService: false
+    autoStartService: current.autoStartService,
+    setupCompletedAt: current.setupCompletedAt,
+    setupVersion: current.setupVersion,
+    autoRepairEnabled: current.autoRepairEnabled
   };
 }
 

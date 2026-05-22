@@ -9,6 +9,9 @@ export type CompanionSettings = {
   modelPreset: CompanionModelPreset;
   customModelId: string;
   autoStartService: boolean;
+  setupCompletedAt: string | null;
+  setupVersion: string | null;
+  autoRepairEnabled: boolean;
 };
 
 export type SettingsResponse = {
@@ -24,7 +27,10 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   backend: "fake",
   modelPreset: "qwen3-0.6b-4bit",
   customModelId: "",
-  autoStartService: false
+  autoStartService: false,
+  setupCompletedAt: null,
+  setupVersion: null,
+  autoRepairEnabled: false
 };
 
 export const DEFAULT_SETTINGS_RESPONSE: SettingsResponse = {

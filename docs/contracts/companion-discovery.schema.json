@@ -23,7 +23,7 @@
       "const": 1
     },
     "app": {
-      "const": "EchoNote ASR Companion"
+      "const": "EchoNote"
     },
     "service": {
       "const": "echonote-asr"

@@ -11,7 +11,7 @@ export type CompanionModelStatus = "not_loaded" | "loading" | "ready" | "error" 
 
 export type CompanionDiscovery = {
   version: 1;
-  app: "EchoNote ASR Companion";
+  app: "EchoNote";
   service: "echonote-asr";
   status: CompanionServiceStatus;
   baseUrl: string;
@@ -159,8 +159,8 @@ export function validateCompanionDiscovery(value: unknown): ValidationResult {
   if (value.version !== 1) {
     return { ok: false, reason: "Discovery version must be 1." };
   }
-  if (value.app !== "EchoNote ASR Companion") {
-    return { ok: false, reason: "Discovery app must be EchoNote ASR Companion." };
+  if (value.app !== "EchoNote") {
+    return { ok: false, reason: "Discovery app must be EchoNote." };
   }
   if (value.service !== "echonote-asr") {
     return { ok: false, reason: "Discovery service must be echonote-asr." };

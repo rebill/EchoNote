@@ -63,7 +63,7 @@ export class EchoNoteSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("ASR backend")
-      .setDesc("EchoNote now uses EchoNote ASR Companion only. Start, stop, restart, and configure the ASR service in the Companion app.");
+      .setDesc("EchoNote now uses the EchoNote desktop app only. Start, stop, restart, and configure the ASR service in the desktop app.");
 
     new Setting(containerEl)
       .setName("Companion discovery path")

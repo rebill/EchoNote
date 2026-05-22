@@ -4,11 +4,20 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-05-22
+
+### Added
+
+- Added the EchoNote setup wizard for first-run detection, one-click fake-backend runtime setup/repair, default service start, setup reset, and setup-aware diagnostics.
+- Added shared Rust and TypeScript setup response contracts, UI fixtures, and setup-aware fake-backend smoke coverage.
 
 ### Changed
 
 - Initialized version metadata for the v0.3.0 plugin, ASR service, Companion, and Obsidian version map.
+- Renamed the desktop app display name from `EchoNote ASR Companion` to `EchoNote`.
+- Renamed Companion package, crate, and local preview identifiers to `echonote`.
+- Moved Python path, ASR service path, port, backend, and custom model ID controls behind `Advanced Settings`.
+- Updated Obsidian plugin runtime copy to direct users to open EchoNote and click `Set Up EchoNote` or `Start Service`.
 
 ## [0.2.0] - 2026-05-21
 
@@ -41,6 +50,6 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
-[0.3.0]: https://github.com/rebill/EchoNote/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/rebill/EchoNote/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rebill/EchoNote/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rebill/EchoNote/releases/tag/v0.1.0

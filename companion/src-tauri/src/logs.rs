@@ -1,5 +1,6 @@
 use crate::process::ProcessManagerState;
 use crate::settings::{CompanionSettings, SettingsStore};
+use crate::setup;
 use crate::state::RuntimeState;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -106,6 +107,7 @@ pub fn diagnostic_report(
         .snapshot(&settings_response.settings);
 
     Ok(build_diagnostic_report(
+        app,
         &settings_response.settings,
         &settings_response.settings_path,
         &log_store,
@@ -114,6 +116,7 @@ pub fn diagnostic_report(
 }
 
 fn build_diagnostic_report(
+    app: &tauri::AppHandle,
     settings: &CompanionSettings,
     settings_path: &str,
     log_store: &LogStore,
@@ -172,6 +175,11 @@ fn build_diagnostic_report(
         "- ASR log path: {}\n",
         log_store.asr_log_path.to_string_lossy()
     ));
+    report.push_str("\n## Setup\n\n");
+    for line in setup::setup_diagnostic_lines(app, settings, runtime) {
+        report.push_str(&line);
+        report.push('\n');
+    }
     report.push_str("\n## Recent Logs\n\n");
 
     if recent_logs.is_empty() {

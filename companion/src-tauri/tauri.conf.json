@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "EchoNote ASR Companion",
+  "productName": "EchoNote",
   "version": "0.3.0",
   "identifier": "com.rebill.echonote.companion",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "EchoNote ASR Companion",
+        "title": "EchoNote",
         "width": 1040,
         "height": 760,
         "minWidth": 760,

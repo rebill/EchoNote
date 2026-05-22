@@ -46,6 +46,9 @@ pub struct CompanionSettings {
     pub model_preset: ModelPreset,
     pub custom_model_id: String,
     pub auto_start_service: bool,
+    pub setup_completed_at: Option<String>,
+    pub setup_version: Option<String>,
+    pub auto_repair_enabled: bool,
 }
 
 impl Default for CompanionSettings {
@@ -58,6 +61,9 @@ impl Default for CompanionSettings {
             model_preset: ModelPreset::Qwen3_0_6b4bit,
             custom_model_id: String::new(),
             auto_start_service: false,
+            setup_completed_at: None,
+            setup_version: None,
+            auto_repair_enabled: false,
         }
     }
 }
@@ -70,6 +76,14 @@ impl CompanionSettings {
         self.asr_service_path =
             trimmed_or_default(self.asr_service_path, defaults.asr_service_path);
         self.custom_model_id = self.custom_model_id.trim().to_string();
+        self.setup_completed_at = self
+            .setup_completed_at
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.setup_version = self
+            .setup_version
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
 
         if self.preferred_port == 0 {
             self.preferred_port = defaults.preferred_port;
@@ -160,6 +174,25 @@ impl SettingsStore {
         Ok(self.response(normalized, false))
     }
 
+    pub fn load_read_only_or_default(&self) -> SettingsResponse {
+        if !self.settings_path.exists() {
+            return self.response(CompanionSettings::default(), true);
+        }
+
+        let Ok(raw) = fs::read_to_string(&self.settings_path) else {
+            return self.response(CompanionSettings::default(), true);
+        };
+
+        match serde_json::from_str::<CompanionSettings>(&raw) {
+            Ok(settings) => self.response(settings.normalized(), false),
+            Err(_) => self.response(CompanionSettings::default(), true),
+        }
+    }
+
+    pub fn settings_path_string(&self) -> String {
+        self.settings_path.to_string_lossy().into_owned()
+    }
+
     fn save_recovered_default(&self) -> Result<SettingsResponse, String> {
         let settings = CompanionSettings::default();
         self.write(&settings)?;
@@ -237,6 +270,9 @@ mod tests {
             model_preset: ModelPreset::Custom,
             custom_model_id: " ".to_string(),
             auto_start_service: true,
+            setup_completed_at: Some(" ".to_string()),
+            setup_version: Some(" 0.3.0 ".to_string()),
+            auto_repair_enabled: true,
         }
         .normalized();
 
@@ -246,6 +282,9 @@ mod tests {
         assert_eq!(settings.backend, Backend::MlxAudio);
         assert_eq!(settings.model_preset, ModelPreset::Qwen3_0_6b4bit);
         assert!(settings.auto_start_service);
+        assert_eq!(settings.setup_completed_at, None);
+        assert_eq!(settings.setup_version.as_deref(), Some("0.3.0"));
+        assert!(settings.auto_repair_enabled);
     }
 
     #[test]
@@ -265,6 +304,9 @@ mod tests {
                 model_preset: ModelPreset::Custom,
                 custom_model_id: "local/model".to_string(),
                 auto_start_service: true,
+                setup_completed_at: Some("2026-05-21T00:00:00Z".to_string()),
+                setup_version: Some("0.3.0".to_string()),
+                auto_repair_enabled: true,
                 ..CompanionSettings::default()
             })
             .expect("save settings");
@@ -277,6 +319,7 @@ mod tests {
         assert!(!reloaded.recovered);
         assert_eq!(reloaded.settings.python_path, "/usr/bin/python3");
         assert_eq!(reloaded.settings.backend, Backend::MlxAudio);
+        assert_eq!(reloaded.settings.setup_version.as_deref(), Some("0.3.0"));
 
         fs::write(&path, "{not-json").expect("write invalid json");
         let recovered = store.load_or_default().expect("recover default settings");
@@ -292,7 +335,7 @@ mod tests {
             .expect("system clock before epoch")
             .as_nanos();
         std::env::temp_dir()
-            .join(format!("echonote-companion-settings-test-{nonce}"))
+            .join(format!("echonote-settings-test-{nonce}"))
             .join("companion-settings.json")
     }
 }

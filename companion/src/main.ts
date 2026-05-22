@@ -1,18 +1,24 @@
 import "./styles.css";
 import {
   copyDiagnosticReport,
+  detectSetup,
   getCompanionAppState,
   getCompanionSettings,
   loadCompanionModel,
   openLogsFolder,
+  installOrRepairRuntime,
   restartCompanionService,
+  resetSetup,
   saveCompanionSettings,
+  startServiceWithDefaults,
   startCompanionService,
   stopCompanionService
 } from "./lib/companion-api";
 import { renderStatusDashboard } from "./components/StatusDashboard";
 import type { CompanionSettings } from "./lib/settings";
 import type { CompanionAppState } from "./lib/state";
+import type { SetupPrimaryAction, SetupResponse } from "./lib/setup";
+import { renderSetupDashboard } from "./components/SetupDashboard";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 
@@ -23,6 +29,9 @@ if (!app) {
 const appRoot = app;
 let renderInFlight = false;
 let modelLoadInFlight = false;
+let setupActionInFlight = false;
+let advancedSettingsOpen = false;
+let stickySetupError: SetupResponse | null = null;
 
 async function render(): Promise<void> {
   if (renderInFlight) {
@@ -31,12 +40,25 @@ async function render(): Promise<void> {
 
   renderInFlight = true;
   try {
-    const [state, settingsResponse] = await Promise.all([
+    const [state, settingsResponse, setup] = await Promise.all([
       getCompanionAppState(),
-      getCompanionSettings()
+      getCompanionSettings(),
+      detectSetup()
     ]);
 
-    renderStatusDashboard(appRoot, applyPendingUiState(state), settingsResponse, {
+    renderWithSetup(applyPendingUiState(state), settingsResponse, stickySetupError ?? setup);
+  } finally {
+    renderInFlight = false;
+  }
+}
+
+function renderWithSetup(
+  state: CompanionAppState,
+  settingsResponse: Awaited<ReturnType<typeof getCompanionSettings>>,
+  setup: SetupResponse
+): void {
+  if (setup.status === "unknown") {
+    renderStatusDashboard(appRoot, state, settingsResponse, {
       onRefresh: render,
       onSaveSettings: saveSettings,
       onStartService: () => runServiceCommand(startCompanionService),
@@ -46,18 +68,75 @@ async function render(): Promise<void> {
       onCopyDiagnostic: copyDiagnostic,
       onOpenLogsFolder: openLogs
     });
-  } finally {
-    renderInFlight = false;
+    return;
   }
+
+  renderSetupDashboard(appRoot, setup, settingsResponse, {
+    busy: setupActionInFlight || modelLoadInFlight,
+    advancedSettingsOpen,
+    onRefresh: refreshSetup,
+    onPrimaryAction: runSetupPrimaryAction,
+    onAdvancedSettingsToggle: (open) => {
+      advancedSettingsOpen = open;
+    },
+    onSaveSettings: saveSettings,
+    onResetSetup: resetSetupSettings,
+    onRestartService: () => runServiceCommand(restartCompanionService),
+    onLoadModel: loadModel,
+    onCopyDiagnostic: copyDiagnostic,
+    onOpenLogsFolder: openLogs
+  });
 }
 
 async function saveSettings(settings: CompanionSettings): Promise<void> {
   try {
+    stickySetupError = null;
     await saveCompanionSettings(settings);
+    await detectSetup();
     await render();
   } catch (error) {
     window.alert(error instanceof Error ? error.message : String(error));
   }
+}
+
+async function resetSetupSettings(): Promise<void> {
+  try {
+    stickySetupError = null;
+    await resetSetup();
+    await render();
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function runSetupPrimaryAction(action: SetupPrimaryAction): Promise<void> {
+  stickySetupError = null;
+  setupActionInFlight = true;
+  await render();
+
+  try {
+    let setupResponse: SetupResponse | null = null;
+    if (action === "setup" || action === "repair") {
+      setupResponse = await installOrRepairRuntime();
+    } else if (action === "start") {
+      setupResponse = await startServiceWithDefaults();
+    } else if (action === "stop") {
+      await stopCompanionService();
+    } else if (action === "retry") {
+      setupResponse = await installOrRepairRuntime();
+    }
+    stickySetupError = setupResponse?.status === "error" ? setupResponse : null;
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
+  } finally {
+    setupActionInFlight = false;
+    await render();
+  }
+}
+
+async function refreshSetup(): Promise<void> {
+  stickySetupError = null;
+  await render();
 }
 
 async function loadModel(): Promise<void> {

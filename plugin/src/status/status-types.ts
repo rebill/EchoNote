@@ -4,7 +4,7 @@ import type { AsrRuntimeMode } from "../settings/settings";
 export type MicrophonePermissionStatus = "unknown" | "granted" | "denied";
 export type AsrServiceStatus = "not_started" | "starting" | "running" | "error";
 export type ModelStatus = "not_loaded" | "loading" | "ready" | "error" | "unknown";
-export type RecordingStatus = "idle" | "recording" | "paused" | "stopping" | "error";
+export type RecordingStatus = "idle" | "starting" | "recording" | "paused" | "stopping" | "error";
 export type ActiveAsrRuntime = "unknown" | "companion";
 export type CompanionStatus =
   | "unknown"

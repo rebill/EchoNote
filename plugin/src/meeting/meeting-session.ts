@@ -27,7 +27,9 @@ export class MeetingSessionController {
   private rawAudioChunks: ArrayBuffer[] = [];
   private queue: AudioChunk[] = [];
   private processing = false;
+  private starting = false;
   private started = false;
+  private stopping = false;
   private asrClient: AsrServiceClient | null = null;
 
   constructor(private readonly options: MeetingSessionControllerOptions) {}
@@ -48,8 +50,13 @@ export class MeetingSessionController {
   }
 
   async start(): Promise<void> {
-    if (this.started) {
+    if (this.starting || this.started) {
       new Notice("EchoNote is already recording.");
+      return;
+    }
+
+    if (this.stopping) {
+      new Notice("EchoNote is stopping the current meeting.");
       return;
     }
 
@@ -64,12 +71,13 @@ export class MeetingSessionController {
 
     const settings = this.options.getSettings();
     const startedAt = new Date();
+    this.starting = true;
 
     try {
       this.options.statusStore.setState({
         asrService: "starting",
         model: "unknown",
-        recording: "idle",
+        recording: "starting",
         lastError: null
       });
       new Notice("EchoNote: checking ASR service...");
@@ -118,6 +126,8 @@ export class MeetingSessionController {
         lastError: this.createStartFailureError(error, "Failed to start EchoNote meeting.")
       });
       new Notice(`EchoNote failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.starting = false;
     }
   }
 
@@ -136,7 +146,7 @@ export class MeetingSessionController {
       this.asrClient = client;
       await this.ensureAsrService(client);
       await this.ensureModelReady(client, runtime.companion.discovery.modelId);
-      new Notice("EchoNote Companion ASR is ready.");
+      new Notice("EchoNote desktop ASR is ready.");
     } catch (error) {
       this.asrClient = null;
       this.options.statusStore.setState({
@@ -165,31 +175,55 @@ export class MeetingSessionController {
   }
 
   async stop(): Promise<void> {
+    if (this.stopping) {
+      new Notice("EchoNote is already stopping.");
+      return;
+    }
+
+    if (this.starting) {
+      new Notice("EchoNote is still starting.");
+      return;
+    }
+
     if (!this.started) {
       this.options.statusStore.setState({ recording: "idle" });
       return;
     }
 
+    this.stopping = true;
     this.options.statusStore.setState({ recording: "stopping" });
-    const finalChunk = await this.options.audioRecorder.stop();
-    if (finalChunk) {
-      await this.enqueueChunk(finalChunk);
-    }
+    try {
+      const finalChunk = await this.options.audioRecorder.stop();
+      if (finalChunk) {
+        await this.enqueueChunk(finalChunk);
+      }
 
-    await this.waitForQueueToDrain();
-    await this.saveCompleteAudioIfEnabled();
-    this.started = false;
-    this.meetingFile = null;
-    this.meetingTitle = null;
-    this.meetingAudioFolder = null;
-    this.asrClient = null;
-    this.rawAudioChunks = [];
-    this.queue = [];
-    this.options.statusStore.setState({
-      recording: "idle",
-      pendingChunkCount: 0
-    });
-    new Notice("EchoNote meeting stopped.");
+      await this.waitForQueueToDrain();
+      await this.saveCompleteAudioIfEnabled();
+      this.started = false;
+      this.meetingFile = null;
+      this.meetingTitle = null;
+      this.meetingAudioFolder = null;
+      this.asrClient = null;
+      this.rawAudioChunks = [];
+      this.queue = [];
+      this.options.statusStore.setState({
+        recording: "idle",
+        pendingChunkCount: 0
+      });
+      new Notice("EchoNote meeting stopped.");
+    } catch (error) {
+      this.options.statusStore.setState({
+        recording: "error",
+        lastError: createEchoNoteError("MEETING_STOP_FAILED", "Failed to stop EchoNote meeting.", {
+          detail: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      });
+      new Notice(`EchoNote failed to stop: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.stopping = false;
+    }
   }
 
   getCurrentMeetingFile(): TFile | null {
@@ -202,7 +236,7 @@ export class MeetingSessionController {
       this.options.statusStore.setState({ asrService: "running" });
       return;
     } catch {
-      throw new Error("Companion ASR runtime is unavailable. Open EchoNote ASR Companion and click Start Service.");
+      throw new Error("Companion ASR runtime is unavailable. Open the EchoNote desktop app and click Start Service.");
     }
   }
 
@@ -278,7 +312,7 @@ export class MeetingSessionController {
     if (!client) {
       this.options.statusStore.setState({
         lastError: createEchoNoteError("ASR_COMPANION_UNAVAILABLE", "Companion ASR client is not available.", {
-          detail: "Start the meeting again after EchoNote ASR Companion is running.",
+          detail: "Start the meeting again after the EchoNote desktop app is running.",
           recoverable: true
         })
       });

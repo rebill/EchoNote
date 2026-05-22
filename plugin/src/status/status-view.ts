@@ -22,6 +22,12 @@ type StatusSummaryItem = {
   tone: string;
 };
 
+type PanelActionOptions = {
+  tone?: "primary" | "danger";
+  disabled?: boolean;
+  active?: boolean;
+};
+
 export class EchoNoteStatusView extends ItemView {
   private unsubscribe: (() => void) | null = null;
 
@@ -135,10 +141,30 @@ export class EchoNoteStatusView extends ItemView {
     this.addPanelAction(utilityActions, "Prepare ASR", "wrench", () => this.plugin.prepareCompanionAsr());
 
     const recordingActions = actions.createDiv({ cls: "echonote-status-action-group" });
-    this.addPanelAction(recordingActions, "Start", "play", () => this.plugin.startMeeting(), "primary");
-    this.addPanelAction(recordingActions, "Pause", "pause", () => this.plugin.pauseRecording());
-    this.addPanelAction(recordingActions, "Resume", "rotate-ccw", () => this.plugin.resumeRecording());
-    this.addPanelAction(recordingActions, "Stop", "square", () => this.plugin.stopMeeting(), "danger");
+    const isStarting = status.recording === "starting";
+    const isRecording = status.recording === "recording";
+    const isPaused = status.recording === "paused";
+    const isStopping = status.recording === "stopping";
+    const hasActiveMeeting = isStarting || isRecording || isPaused || isStopping;
+    this.addPanelAction(recordingActions, "Start", "play", () => this.plugin.startMeeting(), {
+      tone: "primary",
+      disabled: hasActiveMeeting
+    });
+    this.addPanelAction(recordingActions, "Pause", "pause", () => this.plugin.pauseRecording(), {
+      tone: "primary",
+      disabled: !isRecording,
+      active: isRecording
+    });
+    this.addPanelAction(recordingActions, "Resume", "rotate-ccw", () => this.plugin.resumeRecording(), {
+      tone: "primary",
+      disabled: !isPaused,
+      active: isPaused
+    });
+    this.addPanelAction(recordingActions, "Stop", "square", () => this.plugin.stopMeeting(), {
+      tone: "danger",
+      disabled: isStarting || isStopping || !hasActiveMeeting,
+      active: isRecording || isPaused || isStopping
+    });
     this.addPanelAction(recordingActions, "Summarize", "sparkles", () => this.plugin.summarizeCurrentMeeting());
   }
 
@@ -155,11 +181,23 @@ export class EchoNoteStatusView extends ItemView {
     tile.createSpan({ cls: "echonote-status-summary-value", text: this.formatStatusText(item.value) });
   }
 
-  private addPanelAction(parent: HTMLElement, text: string, icon: string, onClick: () => void, tone?: "primary" | "danger"): void {
-    const button = parent.createEl("button", { cls: tone ? `echonote-status-action-${tone}` : "" });
+  private addPanelAction(parent: HTMLElement, text: string, icon: string, onClick: () => void, options: PanelActionOptions = {}): void {
+    const classes = [];
+    if (options.tone) {
+      classes.push(`echonote-status-action-${options.tone}`);
+    }
+    if (options.active) {
+      classes.push("echonote-status-action-active");
+    }
+
+    const button = parent.createEl("button", { cls: classes.join(" ") });
     button.type = "button";
+    button.disabled = Boolean(options.disabled);
     button.setAttribute("aria-label", text);
     button.setAttribute("title", text);
+    if (options.active) {
+      button.setAttribute("aria-pressed", "true");
+    }
     const iconEl = button.createSpan({ cls: "echonote-status-action-icon" });
     setIcon(iconEl, icon);
     button.createSpan({ cls: "echonote-status-action-label", text });

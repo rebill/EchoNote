@@ -45,8 +45,8 @@ export function renderStatusDashboard(
 function createHeader(state: CompanionAppState, options: DashboardOptions): HTMLElement {
   const header = createElement("header", "top-bar");
   const titleGroup = createElement("div", "title-group");
-  titleGroup.append(createElement("p", "eyebrow", "EchoNote"));
-  titleGroup.append(createElement("h1", undefined, "ASR Companion"));
+  titleGroup.append(createElement("p", "eyebrow", "ASR runtime"));
+  titleGroup.append(createElement("h1", undefined, "EchoNote"));
 
   const meta = createElement("div", "header-meta");
   meta.append(createElement("span", "runtime-chip", state.backend));

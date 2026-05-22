@@ -1,6 +1,6 @@
-# EchoNote ASR Companion
+# EchoNote
 
-macOS Tauri companion app for managing the local EchoNote ASR service.
+macOS Tauri desktop app for managing the local EchoNote ASR service.
 
 This desktop app provides a Vite/TypeScript frontend and Tauri 2 Rust backend for starting, stopping, monitoring, and diagnosing the local EchoNote ASR service.
 

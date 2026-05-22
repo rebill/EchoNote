@@ -1,4 +1,5 @@
 use crate::logs::append_log_line;
+use crate::path_resolver::{expand_tilde, resolve_existing_dir_result};
 use crate::settings::{Backend, CompanionSettings};
 use crate::state::{ModelStatus, RuntimeState, ServiceStatus};
 use serde::Deserialize;
@@ -106,7 +107,7 @@ impl ProcessManager {
             return;
         }
 
-        let service_dir = match resolve_service_dir(&settings.asr_service_path) {
+        let service_dir = match resolve_existing_dir_result(&settings.asr_service_path) {
             Ok(service_dir) => service_dir,
             Err(error) => {
                 self.fail_start(error);
@@ -646,57 +647,8 @@ fn base_url(port: u16) -> String {
     format!("http://{ASR_HOST}:{port}")
 }
 
-fn expand_tilde(value: &str) -> PathBuf {
-    if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home_dir) = std::env::var_os("HOME") {
-            return PathBuf::from(home_dir).join(rest);
-        }
-    }
-
-    PathBuf::from(value)
-}
-
-fn resolve_service_dir(value: &str) -> Result<PathBuf, String> {
-    let path = expand_tilde(value);
-    if path.is_absolute() {
-        return require_directory(path);
-    }
-
-    let current_dir = std::env::current_dir()
-        .map_err(|error| format!("Failed to resolve current directory: {error}"))?;
-    let mut candidates = vec![current_dir.join(&path)];
-
-    if let Some(parent) = current_dir.parent() {
-        candidates.push(parent.join(&path));
-        if let Some(grandparent) = parent.parent() {
-            candidates.push(grandparent.join(&path));
-        }
-    }
-
-    for candidate in candidates {
-        if candidate.is_dir() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!(
-        "ASR service path does not exist or is not a directory: {value}"
-    ))
-}
-
-fn require_directory(path: PathBuf) -> Result<PathBuf, String> {
-    if path.is_dir() {
-        Ok(path)
-    } else {
-        Err(format!(
-            "ASR service path does not exist or is not a directory: {}",
-            path.display()
-        ))
-    }
-}
-
 #[derive(Debug, Deserialize)]
-struct HealthResponse {
+pub(crate) struct HealthResponse {
     status: String,
     service: Option<String>,
     version: Option<String>,
@@ -744,7 +696,7 @@ fn request_health(port: u16) -> Result<HealthResponse, String> {
     Ok(health)
 }
 
-fn request_existing_asr_health(port: u16) -> Result<HealthResponse, String> {
+pub(crate) fn request_existing_asr_health(port: u16) -> Result<HealthResponse, String> {
     let health = request_health(port)?;
     match health.service.as_deref() {
         Some("echonote-asr") => Ok(health),
@@ -919,14 +871,18 @@ mod tests {
     use crate::settings::CompanionSettings;
     use crate::state::{ModelStatus, ServiceStatus};
     use std::fs;
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+    use std::sync::{Mutex, MutexGuard};
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+    static PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn starts_stops_and_restarts_fake_service_without_terminal() {
+        let _guard = process_test_guard();
         let service_dir = temp_service_dir(SERVER_MODULE);
         let port = unused_port();
         let settings = settings_for(&service_dir, port);
@@ -940,7 +896,7 @@ mod tests {
             manager.last_error
         );
         assert!(manager.pid.is_some());
-        wait_for_port(port);
+        wait_for_echonote_health(port);
 
         let first_pid = manager.pid;
         manager.restart(&settings);
@@ -952,7 +908,7 @@ mod tests {
         );
         assert!(manager.pid.is_some());
         assert_ne!(manager.pid, first_pid);
-        wait_for_port(port);
+        wait_for_echonote_health(port);
 
         manager.stop();
         assert_eq!(
@@ -969,6 +925,7 @@ mod tests {
 
     #[test]
     fn unexpected_child_exit_moves_state_to_error() {
+        let _guard = process_test_guard();
         let service_dir = temp_service_dir("import sys\nsys.exit(7)\n");
         let settings = settings_for(&service_dir, unused_port());
         let mut manager = ProcessManager::default();
@@ -994,6 +951,7 @@ mod tests {
 
     #[test]
     fn start_fails_when_port_is_already_in_use() {
+        let _guard = process_test_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
         let port = listener.local_addr().expect("read listener address").port();
         let service_dir = temp_service_dir(SERVER_MODULE);
@@ -1016,6 +974,7 @@ mod tests {
 
     #[test]
     fn start_reuses_existing_echonote_asr_service() {
+        let _guard = process_test_guard();
         let service_dir = temp_service_dir(SERVER_MODULE);
         let port = unused_port();
         let settings = settings_for(&service_dir, port);
@@ -1038,7 +997,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("start external fake service");
-        wait_for_port(port);
+        wait_for_echonote_health(port);
 
         let mut manager = ProcessManager::default();
         manager.start(&settings);
@@ -1074,6 +1033,7 @@ mod tests {
 
     #[test]
     fn drop_stops_reused_existing_echonote_asr_service() {
+        let _guard = process_test_guard();
         let service_dir = temp_service_dir(SERVER_MODULE);
         let port = unused_port();
         let settings = settings_for(&service_dir, port);
@@ -1096,7 +1056,7 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("start external fake service");
-        wait_for_port(port);
+        wait_for_echonote_health(port);
 
         let mut manager = ProcessManager::default();
         manager.start(&settings);
@@ -1119,6 +1079,7 @@ mod tests {
 
     #[test]
     fn repeated_running_health_failures_move_state_to_error() {
+        let _guard = process_test_guard();
         let service_dir = temp_service_dir(SERVER_MODULE);
         let port = unused_port();
         let settings = settings_for(&service_dir, port);
@@ -1131,7 +1092,7 @@ mod tests {
             "{:?}",
             manager.last_error
         );
-        wait_for_port(port);
+        wait_for_echonote_health(port);
 
         let unreachable_port = unused_port();
         manager.port = Some(unreachable_port);
@@ -1164,8 +1125,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system clock before epoch")
             .as_nanos();
-        let service_dir =
-            std::env::temp_dir().join(format!("echonote-companion-process-test-{nonce}"));
+        let service_dir = std::env::temp_dir().join(format!("echonote-process-test-{nonce}"));
         let package_dir = service_dir.join("echonote_asr");
         fs::create_dir_all(&package_dir).expect("create fake service package");
         fs::write(package_dir.join("__init__.py"), "").expect("write fake package init");
@@ -1179,15 +1139,21 @@ mod tests {
         listener.local_addr().expect("read local addr").port()
     }
 
-    fn wait_for_port(port: u16) {
+    fn process_test_guard() -> MutexGuard<'static, ()> {
+        PROCESS_TEST_LOCK
+            .lock()
+            .expect("process test lock poisoned")
+    }
+
+    fn wait_for_echonote_health(port: u16) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            if super::request_existing_asr_health(port).is_ok() {
                 return;
             }
             thread::sleep(Duration::from_millis(50));
         }
-        panic!("fake ASR service did not open port {port}");
+        panic!("fake ASR service did not become healthy on port {port}");
     }
 
     const SERVER_MODULE: &str = r#"

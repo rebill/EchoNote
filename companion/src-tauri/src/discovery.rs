@@ -8,7 +8,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 const DISCOVERY_FILE_NAME: &str = "companion.json";
-const APP_NAME: &str = "EchoNote ASR Companion";
+const APP_NAME: &str = "EchoNote";
 const SERVICE_NAME: &str = "echonote-asr";
 const HOST: &str = "127.0.0.1";
 
@@ -127,7 +127,7 @@ mod tests {
         let raw = fs::read_to_string(&path).expect("read discovery file");
         let discovery: Value = serde_json::from_str(&raw).expect("parse discovery json");
         assert_eq!(discovery["version"], 1);
-        assert_eq!(discovery["app"], "EchoNote ASR Companion");
+        assert_eq!(discovery["app"], "EchoNote");
         assert_eq!(discovery["service"], "echonote-asr");
         assert_eq!(discovery["status"], "running");
         assert_eq!(discovery["baseUrl"], "http://127.0.0.1:8765");
@@ -152,7 +152,7 @@ mod tests {
             .expect("system clock before epoch")
             .as_nanos();
         std::env::temp_dir()
-            .join(format!("echonote-companion-discovery-test-{nonce}"))
+            .join(format!("echonote-discovery-test-{nonce}"))
             .join("companion.json")
     }
 }

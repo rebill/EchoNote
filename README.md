@@ -6,7 +6,7 @@ MVP scope:
 
 - macOS only.
 - Local ASR with MLX.
-- Optional macOS ASR Companion to start, stop, monitor, and diagnose the local ASR service.
+- Optional macOS EchoNote desktop app to start, stop, monitor, and diagnose the local ASR service.
 - Quasi-real-time chunk transcription.
 - Markdown meeting notes in your Obsidian vault.
 - OpenAI-compatible and Anthropic summary providers.
@@ -17,7 +17,7 @@ MVP scope:
 ```text
 plugin/       Obsidian TypeScript plugin
 asr-service/  Local Python ASR service
-companion/    Tauri ASR Companion app
+companion/    Tauri desktop app for ASR runtime management
 docs/         PRD, technical design, test plans, and user guides
 ```
 
@@ -90,18 +90,17 @@ curl http://127.0.0.1:8765/health
 
 ## ASR Runtime
 
-EchoNote uses EchoNote ASR Companion as the only ASR backend for the Obsidian plugin. The plugin reads Companion discovery and calls the Companion-managed localhost ASR API; it no longer starts its own Python ASR process.
+EchoNote uses the EchoNote desktop app as the only ASR backend for the Obsidian plugin. The plugin reads desktop discovery and calls the EchoNote-managed localhost ASR API; it no longer starts its own Python ASR process.
 
-If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explicit Companion error.
+If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explicit desktop runtime error.
 
-## Run With Companion
+## Run With EchoNote Desktop
 
-The Companion is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. Companion is source-only; no signed `.app` or `.dmg` is published for this release.
+EchoNote desktop is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. The desktop app is source-only; no signed `.app` or `.dmg` is published for this release.
 
 Expected workflow:
 
-1. Install the ASR service environment from `Install ASR Service`.
-2. Build and run Companion from source:
+1. Build and run EchoNote desktop from source:
 
 ```bash
 cd companion
@@ -109,15 +108,11 @@ npm install
 npm run tauri:dev
 ```
 
-3. Open EchoNote ASR Companion.
-4. Configure:
-   - Python executable path.
-   - ASR service directory.
-   - Port, usually `8765`.
-   - Backend: `fake` for smoke tests or `mlx-audio` for local ASR.
-   - Model ID.
-5. Click `Start Service`.
-6. Confirm the Companion shows `Service: Running` and writes discovery to:
+2. Open EchoNote.
+3. Click `Set Up EchoNote`.
+4. Wait for the setup steps to find Python, prepare `asr-service/.venv`, install fake-backend-safe dependencies, and start the local service.
+5. Use `Advanced Settings` only for custom Python paths, ports, backend, or model IDs.
+6. Confirm EchoNote shows `Service: Running` and writes discovery to:
 
 ```text
 ~/Library/Application Support/EchoNote/companion.json
@@ -131,7 +126,7 @@ For the release smoke path, run:
 node scripts/v0_2_0_fake_backend_smoke.mjs
 ```
 
-This starts the fake backend, writes a temporary discovery file, verifies the plugin resolves Companion, and verifies legacy Manual settings migrate away from plugin-managed ASR.
+This validates the setup API fallback contract, starts the fake backend, writes a temporary discovery file, verifies the plugin resolves the desktop runtime, and verifies legacy Manual settings migrate away from plugin-managed ASR.
 
 ## Build Obsidian Plugin
 
@@ -187,7 +182,7 @@ For AI summaries, configure either:
 
 ## Basic Workflow
 
-1. Open EchoNote ASR Companion and click `Start Service`.
+1. Open EchoNote and click `Start Service`.
 2. Open Obsidian and enable EchoNote.
 3. Open `EchoNote Status`.
 4. Confirm Companion status is `available`.
@@ -220,6 +215,9 @@ For a mixed source containing both your microphone and meeting software output, 
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Product Requirements](docs/PRD.md)
+- [v0.3.0 Setup Wizard PRD](docs/V0_3_0_SETUP_WIZARD_PRD.md)
+- [v0.3.0 Setup Wizard Technical Design](docs/V0_3_0_SETUP_WIZARD_TECH_DESIGN.md)
+- [v0.3.0 Setup Wizard Tasks](docs/V0_3_0_SETUP_WIZARD_TASKS.md)
 - [v0.2.0 Tauri ASR Companion PRD](docs/V0_2_0_TAURI_COMPANION_PRD.md)
 - [v0.2.0 Tauri ASR Companion Technical Design](docs/V0_2_0_TAURI_COMPANION_TECH_DESIGN.md)
 - [v0.2.0 Tauri ASR Companion Tasks](docs/V0_2_0_TAURI_COMPANION_TASKS.md)

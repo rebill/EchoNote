@@ -11,10 +11,12 @@ import { fileURLToPath } from "url";
 const DEFAULT_MODEL_ID = "mlx-community/Qwen3-ASR-0.6B-4bit";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const asrServiceDir = join(repoRoot, "asr-service");
+const companionDir = join(repoRoot, "companion");
 const pluginDir = join(repoRoot, "plugin");
 const tempDir = await mkdtemp(join(tmpdir(), "echonote-v0-2-fake-smoke-"));
 const discoveryPath = join(tempDir, "companion.json");
 const runnerPath = join(tempDir, "plugin-runtime-runner.mjs");
+const setupRunnerPath = join(tempDir, "setup-runtime-runner.mjs");
 
 let asrProcess;
 let asrExit = null;
@@ -27,6 +29,9 @@ try {
   const port = await getOpenPort();
   const baseUrl = `http://127.0.0.1:${port}`;
   asrBaseUrl = baseUrl;
+
+  await verifySetupContractFallback();
+  log("Setup detector/API fallback contract checks passed");
 
   log(`Starting fake ASR service on ${baseUrl}`);
   asrProcess = spawn(
@@ -77,7 +82,7 @@ try {
 
   await writeDiscovery(discoveryPath, {
     version: 1,
-    app: "EchoNote ASR Companion",
+    app: "EchoNote",
     service: "echonote-asr",
     status: "running",
     baseUrl,
@@ -314,6 +319,90 @@ async function verifyPluginRuntimeResolver(path, expectedBaseUrl) {
   });
   if (result.code !== 0) {
     throw new Error(`Plugin runtime resolver check failed:\n${result.stdout}\n${result.stderr}`);
+  }
+}
+
+async function verifySetupContractFallback() {
+  const require = createRequire(import.meta.url);
+  const esbuild = require(join(pluginDir, "node_modules", "esbuild"));
+  const runnerSource = `
+    const storage = new Map();
+    globalThis.window = {
+      localStorage: {
+        getItem: (key) => storage.has(key) ? storage.get(key) : null,
+        setItem: (key, value) => storage.set(key, String(value)),
+        removeItem: (key) => storage.delete(key)
+      }
+    };
+    globalThis.window.window = globalThis.window;
+    globalThis.window.__TAURI_INTERNALS__ = undefined;
+
+    const api = await import(${JSON.stringify(join(companionDir, "src", "lib", "companion-api.ts"))});
+    const fixtures = await import(${JSON.stringify(join(companionDir, "src", "lib", "setup-fixtures.ts"))});
+
+    const setup = await api.detectSetup();
+    if (setup.status !== "not_configured" || setup.primaryAction !== "setup") {
+      throw new Error("Unexpected setup fallback response: " + JSON.stringify(setup));
+    }
+    if (!setup.steps.some((step) => step.id === "python")) {
+      throw new Error("Setup response must include a python setup step.");
+    }
+
+    const repaired = await api.installOrRepairRuntime();
+    if (repaired.status !== "error" || repaired.primaryAction !== "retry") {
+      throw new Error("Browser fallback install/repair must fail safely: " + JSON.stringify(repaired));
+    }
+
+    const reset = await api.resetSetup();
+    if (reset.status !== "not_configured" || reset.settings.backend !== "fake") {
+      throw new Error("Reset setup fallback did not restore fake backend defaults: " + JSON.stringify(reset));
+    }
+
+    const expectedStatuses = [
+      "unknown",
+      "checking",
+      "not_configured",
+      "ready",
+      "running",
+      "repair_required",
+      "installing",
+      "unsupported",
+      "error"
+    ];
+    for (const status of expectedStatuses) {
+      if (!fixtures.SETUP_RESPONSE_FIXTURES[status]) {
+        throw new Error("Missing setup fixture for " + status);
+      }
+    }
+
+    console.log(JSON.stringify({
+      setup: setup.status,
+      installFallback: repaired.status,
+      reset: reset.status,
+      fixtures: expectedStatuses.length
+    }));
+  `;
+
+  await esbuild.build({
+    stdin: {
+      contents: runnerSource,
+      resolveDir: companionDir,
+      sourcefile: "setup-runtime-runner.ts",
+      loader: "ts"
+    },
+    outfile: setupRunnerPath,
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "node20",
+    logLevel: "silent"
+  });
+
+  const result = await runCommand(process.execPath, [setupRunnerPath], {
+    cwd: repoRoot
+  });
+  if (result.code !== 0) {
+    throw new Error(`Setup contract check failed:\n${result.stdout}\n${result.stderr}`);
   }
 }
 
