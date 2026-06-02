@@ -8,6 +8,7 @@ rmSync(outdir, { recursive: true, force: true });
 mkdirSync(outdir, { recursive: true });
 
 const testFiles = [
+  "tests/asr-service-client.test.ts",
   "tests/audio-chunker.test.ts",
   "tests/companion-discovery.test.ts",
   "tests/markdown-sections.test.ts"
