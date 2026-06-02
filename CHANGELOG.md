@@ -4,6 +4,22 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.4.0] - 2026-06-01
+
+### Added
+
+- Added silence-aware audio chunking for live transcription with a 15 second force-cut fallback.
+- Added transcript turns, speaker labels, and `/transcript/finalize` for speaker-aware final transcripts.
+- Added optional local `pyannote.audio` diarization support with Hugging Face token handling in EchoNote desktop.
+- Added Companion discovery capabilities for adaptive chunking and speaker diarization.
+- Added plugin, ASR service, and Companion tests for v0.4.0 transcript contracts and degradation paths.
+
+### Changed
+
+- Final meeting stop now attempts a local finalize pass and only replaces `## Transcript` when non-empty final turns are returned.
+- Complete meeting audio is temporarily retained in memory for local finalization, while vault audio saving remains controlled by `Save raw audio`.
+- Version metadata is aligned for the v0.4.0 plugin, ASR service, Companion, and Obsidian version map.
+
 ## [0.3.0] - 2026-05-22
 
 ### Added
@@ -50,6 +66,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.4.0]: https://github.com/rebill/EchoNote/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rebill/EchoNote/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rebill/EchoNote/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rebill/EchoNote/releases/tag/v0.1.0

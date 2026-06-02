@@ -131,6 +131,16 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 {
   "chunk_id": "chunk_000012",
   "text": "我们今天主要讨论 EchoNote 第一版的范围。",
+  "turns": [
+    {
+      "id": "chunk_000012-turn-001",
+      "text": "我们今天主要讨论 EchoNote 第一版的范围。",
+      "speaker": null,
+      "started_at_ms": 180000,
+      "ended_at_ms": 195000,
+      "confidence": null
+    }
+  ],
   "started_at_ms": 180000,
   "ended_at_ms": 195000,
   "language": "zh",
@@ -142,9 +152,86 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 
 - `chunk_id`
 - `text`
+- `turns`
 - `started_at_ms`
 - `ended_at_ms`
 - `model_id`
+
+`TranscriptTurn` 必须包含：
+
+- `id`
+- `text`
+- `speaker`
+- `started_at_ms`
+- `ended_at_ms`
+
+`speaker` 在实时转录阶段通常为 `null`。
+
+### `GET /diarization/status`
+
+响应：
+
+```json
+{
+  "status": "unavailable",
+  "model_id": "pyannote/speaker-diarization-community-1",
+  "error": "Hugging Face token is not configured"
+}
+```
+
+`status` 可选值：
+
+- `disabled`
+- `available`
+- `unavailable`
+- `failed`
+
+### `POST /transcript/finalize`
+
+请求类型：`multipart/form-data`
+
+字段：
+
+- `audio`：完整会议 WAV，16kHz mono PCM 16-bit。
+- `meeting_id`：会议 ID。
+- `segments_json`：实时转录返回的 `TranscriptSegment[]` JSON 字符串。
+- `language`：可选，`auto`、`zh` 或 `en`。
+- `enable_diarization`：可选，`true` 或 `false`。
+
+响应：
+
+```json
+{
+  "meeting_id": "2026-06-01-Meeting",
+  "turns": [
+    {
+      "id": "chunk_000001-turn-001",
+      "text": "我们先看今天的目标。",
+      "speaker": "Speaker 1",
+      "started_at_ms": 3000,
+      "ended_at_ms": 9000,
+      "confidence": 0.92
+    }
+  ],
+  "speakers": [
+    {
+      "id": "speaker_1",
+      "label": "Speaker 1",
+      "total_ms": 6000
+    }
+  ],
+  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+  "diarization_model_id": "pyannote/speaker-diarization-community-1",
+  "diarization_status": "available",
+  "error": null
+}
+```
+
+降级规则：
+
+- `enable_diarization=false` 时返回 `diarization_status=disabled`，turns 的 `speaker` 可以为 `null`。
+- 未配置 Hugging Face token 或未安装 `pyannote.audio` 时返回 HTTP 200 和 `diarization_status=unavailable`。
+- diarization 运行失败时返回 HTTP 200 和 `diarization_status=failed`，不得返回空 transcript 覆盖实时稿。
 
 ### `POST /shutdown`
 
@@ -210,6 +297,10 @@ type CompanionDiscovery = {
   modelStatus: CompanionModelStatus;
   pid: number | null;
   updatedAt: string;
+  capabilities?: {
+    adaptiveChunking?: boolean;
+    speakerDiarization?: "available" | "unavailable" | "disabled" | "failed" | "error";
+  };
 };
 ```
 
@@ -229,6 +320,7 @@ type CompanionDiscovery = {
 | `modelStatus` | 当前模型状态；无法确认时写 `unknown`。 |
 | `pid` | Companion 当前管理的 ASR 子进程 PID；没有活跃子进程时为 `null`。 |
 | `updatedAt` | UTC ISO 8601 时间戳，例如 `2026-05-21T06:34:00.000Z`。 |
+| `capabilities` | v0.4.0 新增可选能力字段；旧客户端必须兼容缺失值。 |
 
 安全约束：
 

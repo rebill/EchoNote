@@ -1,7 +1,7 @@
 use crate::logs::append_log_line;
 use crate::path_resolver::{expand_tilde, resolve_existing_dir_result};
 use crate::settings::{Backend, CompanionSettings};
-use crate::state::{ModelStatus, RuntimeState, ServiceStatus};
+use crate::state::{DiarizationStatus, ModelStatus, RuntimeState, ServiceStatus};
 use serde::Deserialize;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -36,6 +36,8 @@ pub(crate) struct ProcessManager {
     port: Option<u16>,
     resolved_model_id: Option<String>,
     backend: Option<Backend>,
+    diarization_status: DiarizationStatus,
+    diarization_model_id: Option<String>,
     last_error: Option<String>,
     last_exit_code: Option<i32>,
     consecutive_health_failures: u8,
@@ -56,6 +58,8 @@ impl Default for ProcessManager {
             port: None,
             resolved_model_id: None,
             backend: None,
+            diarization_status: DiarizationStatus::Unavailable,
+            diarization_model_id: None,
             last_error: None,
             last_exit_code: None,
             consecutive_health_failures: 0,
@@ -92,6 +96,12 @@ impl ProcessManager {
         self.base_url = Some(base_url(settings.preferred_port));
         self.resolved_model_id = Some(settings.resolved_model_id());
         self.backend = Some(settings.backend);
+        self.diarization_status = if settings.diarization_enabled {
+            DiarizationStatus::Unavailable
+        } else {
+            DiarizationStatus::Disabled
+        };
+        self.diarization_model_id = Some(settings.diarization_model_id.clone());
         self.consecutive_health_failures = 0;
         self.last_poll_at = None;
 
@@ -149,6 +159,17 @@ impl ProcessManager {
             .stdin(Stdio::null())
             .stdout(stdout)
             .stderr(stderr);
+        if settings.diarization_enabled {
+            command.env("ECHONOTE_DIARIZATION_ENABLED", "1");
+        } else {
+            command.env("ECHONOTE_DIARIZATION_ENABLED", "0");
+        }
+        if !settings.diarization_model_id.trim().is_empty() {
+            command.env("ECHONOTE_DIARIZATION_MODEL_ID", settings.diarization_model_id.trim());
+        }
+        if !settings.hugging_face_token.trim().is_empty() {
+            command.env("HUGGINGFACE_HUB_TOKEN", settings.hugging_face_token.trim());
+        }
 
         match command.spawn() {
             Ok(child) => {
@@ -303,6 +324,11 @@ impl ProcessManager {
             .clone()
             .unwrap_or_else(|| settings.resolved_model_id());
         runtime.backend = self.backend.unwrap_or(settings.backend);
+        runtime.diarization_status = self.diarization_status;
+        runtime.diarization_model_id = self
+            .diarization_model_id
+            .clone()
+            .unwrap_or_else(|| settings.diarization_model_id.clone());
         runtime.last_error = self.last_error.clone();
         runtime.last_exit_code = self.last_exit_code;
 
@@ -411,6 +437,7 @@ impl ProcessManager {
                             .unwrap_or_default()
                     ));
                     self.poll_model_status(port);
+                    self.poll_diarization_status(port);
                     return;
                 }
                 Err(error) => {
@@ -454,6 +481,7 @@ impl ProcessManager {
                 self.consecutive_health_failures = 0;
                 self.last_error = None;
                 self.poll_model_status(port);
+                self.poll_diarization_status(port);
             }
             Err(error) => {
                 self.consecutive_health_failures =
@@ -494,6 +522,24 @@ impl ProcessManager {
             Err(error) => {
                 self.model_status = ModelStatus::Unknown;
                 self.push_log(format!("Failed to poll ASR model status: {error}"));
+            }
+        }
+    }
+
+    fn poll_diarization_status(&mut self, port: u16) {
+        match request_diarization_status(port) {
+            Ok(status) => {
+                self.diarization_status = map_diarization_status(&status.status);
+                self.diarization_model_id = status.model_id;
+                if self.diarization_status == DiarizationStatus::Failed {
+                    if let Some(error) = status.error {
+                        self.push_log(format!("Speaker diarization status is failed: {error}"));
+                    }
+                }
+            }
+            Err(error) => {
+                self.diarization_status = DiarizationStatus::Unavailable;
+                self.push_log(format!("Failed to poll diarization status: {error}"));
             }
         }
     }
@@ -545,6 +591,7 @@ impl ProcessManager {
                         .unwrap_or_default()
                 ));
                 self.poll_model_status(port);
+                self.poll_diarization_status(port);
                 true
             }
             Err(error) => {
@@ -667,6 +714,13 @@ struct ModelLoadResponse {
     status: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DiarizationStatusResponse {
+    status: String,
+    model_id: Option<String>,
+    error: Option<String>,
+}
+
 struct HttpResponse {
     status_code: u16,
     body: String,
@@ -743,6 +797,19 @@ fn request_model_load(port: u16, model_id: &str) -> Result<ModelLoadResponse, St
 
     serde_json::from_str(&response.body)
         .map_err(|error| format!("failed to parse /model/load response: {error}"))
+}
+
+fn request_diarization_status(port: u16) -> Result<DiarizationStatusResponse, String> {
+    let response = send_local_http_request("GET", "/diarization/status", port)?;
+    if !(200..300).contains(&response.status_code) {
+        return Err(format!(
+            "GET /diarization/status returned HTTP {}",
+            response.status_code
+        ));
+    }
+
+    serde_json::from_str(&response.body)
+        .map_err(|error| format!("failed to parse /diarization/status response: {error}"))
 }
 
 fn request_shutdown(port: u16) -> Result<(), String> {
@@ -830,6 +897,15 @@ fn map_model_status(status: &str) -> ModelStatus {
         "ready" => ModelStatus::Ready,
         "error" => ModelStatus::Error,
         _ => ModelStatus::Unknown,
+    }
+}
+
+fn map_diarization_status(status: &str) -> DiarizationStatus {
+    match status {
+        "disabled" => DiarizationStatus::Disabled,
+        "available" => DiarizationStatus::Available,
+        "failed" | "error" => DiarizationStatus::Failed,
+        _ => DiarizationStatus::Unavailable,
     }
 }
 

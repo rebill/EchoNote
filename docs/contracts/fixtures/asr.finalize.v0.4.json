@@ -1,0 +1,37 @@
+{
+  "meeting_id": "2026-06-01-Meeting",
+  "turns": [
+    {
+      "id": "chunk_000001-turn-001",
+      "text": "我们先看今天的目标。",
+      "speaker": "Speaker 1",
+      "started_at_ms": 3000,
+      "ended_at_ms": 9000,
+      "confidence": 0.92
+    },
+    {
+      "id": "chunk_000002-turn-001",
+      "text": "我补充一点，安装流程也要考虑。",
+      "speaker": "Speaker 2",
+      "started_at_ms": 11000,
+      "ended_at_ms": 17000,
+      "confidence": 0.88
+    }
+  ],
+  "speakers": [
+    {
+      "id": "speaker_1",
+      "label": "Speaker 1",
+      "total_ms": 6000
+    },
+    {
+      "id": "speaker_2",
+      "label": "Speaker 2",
+      "total_ms": 6000
+    }
+  ],
+  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+  "diarization_model_id": "pyannote/speaker-diarization-community-1",
+  "diarization_status": "available",
+  "error": null
+}

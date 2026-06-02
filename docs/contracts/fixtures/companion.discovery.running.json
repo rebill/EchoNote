@@ -10,5 +10,9 @@
   "modelId": "mlx-community/Qwen3-ASR-0.6B-4bit",
   "modelStatus": "ready",
   "pid": 12345,
-  "updatedAt": "2026-05-21T06:34:00.000Z"
+  "updatedAt": "2026-05-21T06:34:00.000Z",
+  "capabilities": {
+    "adaptiveChunking": true,
+    "speakerDiarization": "unavailable"
+  }
 }

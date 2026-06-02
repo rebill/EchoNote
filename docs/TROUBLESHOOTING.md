@@ -144,6 +144,30 @@ Fix:
 
 Current code skips empty ASR text and does not write `STTOutput(...)` to the note.
 
+## Speaker diarization is unavailable
+
+Speaker labels are optional. Missing diarization must not block recording, live transcription, or summaries.
+
+Check:
+
+```bash
+curl http://127.0.0.1:8765/diarization/status
+```
+
+Common causes:
+
+- Hugging Face token is not configured in EchoNote desktop Advanced Settings.
+- `pyannote.audio` is not installed. Install with `pip install -e 'asr-service[diarization]'` or run `Repair EchoNote`.
+- The Hugging Face account has not accepted the `pyannote/speaker-diarization-community-1` model terms.
+
+If diarization fails during `Stop Meeting`, EchoNote keeps the live transcript and shows a non-blocking notice.
+
+## Final transcript has no speaker labels
+
+This is expected when diarization is disabled, unavailable, or failed. The final transcript can still replace the live transcript with cleaned turns, but `speaker` remains empty.
+
+Check the EchoNote desktop Runtime panel for `Speaker diarization`. If it is `Unavailable`, configure the Hugging Face token and install the diarization dependencies.
+
 ## No meeting note is created
 
 Check the status panel `Last Error`.

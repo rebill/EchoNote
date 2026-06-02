@@ -32,7 +32,10 @@ export function createSettingsPanel(
       ["qwen3-1.7b-4bit", "Qwen3 ASR 1.7B 4-bit"],
       ["custom", "Custom model"]
     ]),
-    createTextField("Custom model ID", "customModelId", response.settings.customModelId)
+    createTextField("Custom model ID", "customModelId", response.settings.customModelId),
+    createCheckboxField("Speaker diarization", "diarizationEnabled", response.settings.diarizationEnabled),
+    createPasswordField("Hugging Face token", "huggingFaceToken", response.settings.huggingFaceToken),
+    createTextField("Diarization model ID", "diarizationModelId", response.settings.diarizationModelId)
   );
 
   const footer = createElement("div", "settings-footer");
@@ -80,7 +83,14 @@ function readSettings(formData: FormData, current: CompanionSettings): Companion
     autoStartService: current.autoStartService,
     setupCompletedAt: current.setupCompletedAt,
     setupVersion: current.setupVersion,
-    autoRepairEnabled: current.autoRepairEnabled
+    autoRepairEnabled: current.autoRepairEnabled,
+    huggingFaceToken: readString(formData, "huggingFaceToken", ""),
+    diarizationEnabled: formData.get("diarizationEnabled") === "on",
+    diarizationModelId: readString(
+      formData,
+      "diarizationModelId",
+      DEFAULT_COMPANION_SETTINGS.diarizationModelId
+    )
   };
 }
 
@@ -95,6 +105,27 @@ function createTextField(label: string, name: keyof CompanionSettings, value: st
   input.name = name;
   input.value = value;
   input.autocomplete = "off";
+  row.append(input);
+  return row;
+}
+
+function createPasswordField(label: string, name: keyof CompanionSettings, value: string): HTMLElement {
+  const row = createField(label);
+  const input = createElement("input", "text-input");
+  input.name = name;
+  input.type = "password";
+  input.value = value;
+  input.autocomplete = "off";
+  row.append(input);
+  return row;
+}
+
+function createCheckboxField(label: string, name: keyof CompanionSettings, value: boolean): HTMLElement {
+  const row = createField(label);
+  const input = createElement("input", "checkbox-input");
+  input.name = name;
+  input.type = "checkbox";
+  input.checked = value;
   row.append(input);
   return row;
 }

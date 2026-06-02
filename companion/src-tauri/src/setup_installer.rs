@@ -152,6 +152,7 @@ fn install_dependencies_if_needed(
         detection.settings.backend,
     ) {
         log_setup(log_store, "ASR dependencies already look ready.");
+        install_optional_diarization_if_needed(log_store, detection, python, service_dir);
         return Ok(());
     }
 
@@ -175,7 +176,48 @@ fn install_dependencies_if_needed(
         } else {
             "install ASR service"
         },
-    )
+    )?;
+    install_optional_diarization_if_needed(log_store, detection, python, service_dir);
+    Ok(())
+}
+
+fn install_optional_diarization_if_needed(
+    log_store: &LogStore,
+    detection: &SetupDetection,
+    python: &Path,
+    service_dir: &Path,
+) {
+    if !detection.settings.diarization_enabled {
+        return;
+    }
+
+    let pyannote_ready = Command::new(python)
+        .current_dir(service_dir)
+        .arg("-c")
+        .arg("import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyannote.audio') else 1)")
+        .status()
+        .is_ok_and(|status| status.success());
+    if pyannote_ready {
+        log_setup(log_store, "Optional speaker diarization dependency is installed.");
+        return;
+    }
+
+    log_setup(
+        log_store,
+        "Installing optional speaker diarization dependency. Failure will not block ASR setup.",
+    );
+    if let Err(error) = run_logged(
+        log_store,
+        python,
+        &install_command_args(".[diarization]"),
+        service_dir,
+        "install optional speaker diarization dependency",
+    ) {
+        log_setup(
+            log_store,
+            format!("Optional speaker diarization install failed: {error}"),
+        );
+    }
 }
 
 fn install_command_args(extra: &'static str) -> [&'static str; 5] {
@@ -257,6 +299,10 @@ mod tests {
         assert_eq!(
             install_command_args(backend_dependency_extra(Backend::MlxAudio)),
             ["-m", "pip", "install", "-e", ".[mlx]"]
+        );
+        assert_eq!(
+            install_command_args(".[diarization]"),
+            ["-m", "pip", "install", "-e", ".[diarization]"]
         );
     }
 }

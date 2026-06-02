@@ -1,9 +1,9 @@
 import { App, TFile, normalizePath } from "obsidian";
-import type { TranscriptSegment } from "../asr/asr-types";
+import type { TranscriptSegment, TranscriptTurn } from "../asr/asr-types";
 import type { EchoNoteSettings } from "../settings/settings";
-import { formatMeetingTitle, formatTranscriptTimestamp, sanitizeFileName } from "../utils/time";
+import { formatClockTime, formatMeetingTitle, formatTranscriptTimestamp, sanitizeFileName } from "../utils/time";
 import type { MeetingSummary } from "../llm/llm-types";
-import { extractTranscript, replaceSummarySections } from "./markdown-sections";
+import { extractTranscript, replaceMeetingEndTime, replaceSummarySections, replaceTranscriptSection } from "./markdown-sections";
 import { renderMeetingTemplate } from "./meeting-template";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
 
@@ -51,6 +51,24 @@ export class MeetingNoteWriter {
     }
 
     await this.app.vault.append(file, `\n${timestamp}${text}\n`);
+  }
+
+  async replaceTranscript(file: TFile, turns: TranscriptTurn[], enableTimestamps: boolean): Promise<void> {
+    const rendered = formatTranscriptTurns(turns, enableTimestamps);
+    if (!rendered) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    await this.app.vault.modify(file, replaceTranscriptSection(content, rendered));
+  }
+
+  async updateMeetingEndTime(file: TFile, endTime: Date): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const updated = replaceMeetingEndTime(content, formatClockTime(endTime));
+    if (updated !== content) {
+      await this.app.vault.modify(file, updated);
+    }
   }
 
   async saveMeetingAudio(folder: string, meetingTitle: string, wavBytes: ArrayBuffer): Promise<void> {
@@ -122,4 +140,20 @@ function formatTasks(items: string[]): string {
     return "_None._";
   }
   return normalized.map((item) => `- [ ] ${item}`).join("\n");
+}
+
+function formatTranscriptTurns(turns: TranscriptTurn[], enableTimestamps: boolean): string {
+  return turns
+    .map((turn) => {
+      const text = sanitizeTranscriptText(turn.text);
+      if (!text) {
+        return "";
+      }
+
+      const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(turn.started_at_ms)}] ` : "";
+      const speaker = turn.speaker ? `${turn.speaker}: ` : "";
+      return `${timestamp}${speaker}${text}`;
+    })
+    .filter(Boolean)
+    .join("\n");
 }

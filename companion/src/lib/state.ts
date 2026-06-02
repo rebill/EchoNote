@@ -2,6 +2,7 @@ import type { CompanionBackend } from "./settings";
 
 export type ServiceStatus = "stopped" | "starting" | "running" | "stopping" | "error";
 export type ModelStatus = "not_loaded" | "loading" | "ready" | "error" | "unknown";
+export type DiarizationStatus = "disabled" | "available" | "unavailable" | "failed";
 
 export type CompanionAppState = {
   serviceStatus: ServiceStatus;
@@ -10,6 +11,8 @@ export type CompanionAppState = {
   pid: number | null;
   resolvedModelId: string;
   backend: CompanionBackend;
+  diarizationStatus: DiarizationStatus;
+  diarizationModelId: string;
   lastError: string | null;
   lastExitCode: number | null;
   recentLogs: string[];
@@ -25,6 +28,8 @@ export const DEFAULT_COMPANION_STATE: CompanionAppState = {
   pid: null,
   resolvedModelId: "mlx-community/Qwen3-ASR-0.6B-4bit",
   backend: "fake",
+  diarizationStatus: "unavailable",
+  diarizationModelId: "pyannote/speaker-diarization-community-1",
   lastError: null,
   lastExitCode: null,
   recentLogs: [

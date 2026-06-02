@@ -70,6 +70,19 @@
     "updatedAt": {
       "type": "string",
       "format": "date-time"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adaptiveChunking": {
+          "type": "boolean"
+        },
+        "speakerDiarization": {
+          "type": "string",
+          "enum": ["available", "unavailable", "disabled", "failed", "error"]
+        }
+      }
     }
   }
 }

@@ -12,6 +12,13 @@ class ModelLifecycleStatus(StrEnum):
     ERROR = "error"
 
 
+class DiarizationStatus(StrEnum):
+    DISABLED = "disabled"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class HealthResponse:
     status: Literal["ok"]
@@ -46,13 +53,49 @@ class TranscribeRequestMetadata:
 
 
 @dataclass(frozen=True)
+class TranscriptTurn:
+    id: str
+    text: str
+    speaker: str | None
+    started_at_ms: int
+    ended_at_ms: int
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
 class TranscriptSegment:
     chunk_id: str
     text: str
+    turns: list[TranscriptTurn]
     started_at_ms: int
     ended_at_ms: int
     language: str | None
     model_id: str
+
+
+@dataclass(frozen=True)
+class TranscriptSpeaker:
+    id: str
+    label: str
+    total_ms: int
+
+
+@dataclass(frozen=True)
+class DiarizationStatusResponse:
+    status: DiarizationStatus
+    model_id: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class FinalizeTranscriptResponse:
+    meeting_id: str
+    turns: list[TranscriptTurn]
+    speakers: list[TranscriptSpeaker]
+    model_id: str
+    diarization_model_id: str | None
+    diarization_status: DiarizationStatus
+    error: str | None
 
 
 @dataclass(frozen=True)

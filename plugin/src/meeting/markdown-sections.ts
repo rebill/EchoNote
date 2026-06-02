@@ -28,6 +28,27 @@ export function replaceSummarySections(markdown: string, content: SummarySection
   return nextMarkdown;
 }
 
+export function replaceTranscriptSection(markdown: string, content: string): string {
+  const normalizedContent = `\n\n${content.trim()}\n`;
+  const sections = findSections(markdown);
+  const existing = sections.find((section) => section.heading === "Transcript");
+
+  if (existing) {
+    return `${markdown.slice(0, existing.contentStartIndex)}${normalizedContent}${markdown.slice(existing.endIndex)}`;
+  }
+
+  return `${markdown.trimEnd()}\n\n## Transcript${normalizedContent}`;
+}
+
+export function replaceMeetingEndTime(markdown: string, endTime: string): string {
+  const normalizedEndTime = endTime.trim();
+  if (!normalizedEndTime) {
+    return markdown;
+  }
+
+  return markdown.replace(/^(-[ \t]*Time:[ \t]*[^\n]*?[ \t]+-[ \t]*)[^\n]*$/m, `$1${normalizedEndTime}`);
+}
+
 function replaceOrInsertSection(markdown: string, heading: SummarySectionHeading, content: string): string {
   const sections = findSections(markdown);
   const existing = sections.find((section) => section.heading === heading);

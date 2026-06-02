@@ -140,6 +140,14 @@ fn build_diagnostic_report(
     report.push_str(&format!("- Backend: {:?}\n", runtime.backend));
     report.push_str(&format!("- Model ID: {}\n", runtime.resolved_model_id));
     report.push_str(&format!(
+        "- Speaker diarization: {:?}\n",
+        runtime.diarization_status
+    ));
+    report.push_str(&format!(
+        "- Diarization model ID: {}\n",
+        runtime.diarization_model_id
+    ));
+    report.push_str(&format!(
         "- Base URL: {}\n",
         runtime.base_url.as_deref().unwrap_or("Unavailable")
     ));
@@ -242,7 +250,8 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
 fn redact_secrets(value: &str) -> String {
     let without_bearer = redact_bearer_tokens(value);
     let without_keys = redact_sk_keys(&without_bearer);
-    redact_env_secret_values(&without_keys)
+    let without_hf_tokens = redact_hf_tokens(&without_keys);
+    redact_env_secret_values(&without_hf_tokens)
 }
 
 fn redact_bearer_tokens(value: &str) -> String {
@@ -290,6 +299,26 @@ fn redact_sk_keys(value: &str) -> String {
     output
 }
 
+fn redact_hf_tokens(value: &str) -> String {
+    let mut output = String::new();
+    let mut cursor = 0;
+
+    while let Some(relative_index) = value[cursor..].find("hf_") {
+        let token_start = cursor + relative_index;
+        output.push_str(&value[cursor..token_start]);
+
+        let token_end = value[token_start..]
+            .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+            .map(|offset| token_start + offset)
+            .unwrap_or(value.len());
+        output.push_str("hf_[REDACTED]");
+        cursor = token_end;
+    }
+
+    output.push_str(&value[cursor..]);
+    output
+}
+
 fn redact_env_secret_values(value: &str) -> String {
     const SECRET_MARKERS: [&str; 4] = ["API_KEY=", "TOKEN=", "SECRET=", "PASSWORD="];
     let mut line = value.to_string();
@@ -313,11 +342,13 @@ mod tests {
     #[test]
     fn redacts_secrets_and_truncates_long_lines() {
         let sanitized = sanitize_log_line(
-            "Authorization: Bearer abc123 sk-testsecret OPENAI_API_KEY=secret-value",
+            "Authorization: Bearer abc123 sk-testsecret OPENAI_API_KEY=secret-value HUGGINGFACE_HUB_TOKEN=hf_secret hf_rawsecret",
         );
         assert!(sanitized.contains("Authorization: Bearer [REDACTED]"));
         assert!(sanitized.contains("sk-[REDACTED]"));
         assert!(sanitized.contains("OPENAI_API_KEY=[REDACTED]"));
+        assert!(sanitized.contains("HUGGINGFACE_HUB_TOKEN=[REDACTED]"));
+        assert!(sanitized.contains("hf_[REDACTED]"));
 
         let long = "a".repeat(2_100);
         assert!(sanitize_log_line(&long).ends_with("...[truncated]"));

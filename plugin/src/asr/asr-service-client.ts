@@ -1,10 +1,13 @@
 import type { AudioChunk } from "../audio/audio-types";
 import type {
+  FinalizeTranscriptResponse,
   HealthResponse,
   ModelLoadResponse,
   ModelStatusResponse,
   TranscriptSegment
 } from "./asr-types";
+
+const FINALIZE_TIMEOUT_MS = 300_000;
 
 export class AsrServiceClient {
   constructor(private readonly baseUrl: string) {}
@@ -39,6 +42,30 @@ export class AsrServiceClient {
       body: formData
     });
     return this.parseJsonResponse<TranscriptSegment>(response);
+  }
+
+  async finalizeTranscript(
+    meetingId: string,
+    wavBytes: ArrayBuffer,
+    segments: TranscriptSegment[],
+    language: "auto" | "zh" | "en" = "zh",
+    enableDiarization = true
+  ): Promise<FinalizeTranscriptResponse> {
+    const formData = new FormData();
+    formData.append("audio", new Blob([wavBytes], { type: "application/octet-stream" }), `${meetingId}.wav`);
+    formData.append("meeting_id", meetingId);
+    formData.append("segments_json", JSON.stringify(segments));
+    formData.append("language", language);
+    formData.append("enable_diarization", String(enableDiarization));
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), FINALIZE_TIMEOUT_MS);
+    const response = await fetch(`${this.baseUrl}/transcript/finalize`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal
+    }).finally(() => window.clearTimeout(timeout));
+    return this.parseJsonResponse<FinalizeTranscriptResponse>(response);
   }
 
   async shutdown(): Promise<void> {

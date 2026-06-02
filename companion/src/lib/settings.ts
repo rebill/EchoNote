@@ -12,6 +12,9 @@ export type CompanionSettings = {
   setupCompletedAt: string | null;
   setupVersion: string | null;
   autoRepairEnabled: boolean;
+  huggingFaceToken: string;
+  diarizationEnabled: boolean;
+  diarizationModelId: string;
 };
 
 export type SettingsResponse = {
@@ -30,7 +33,10 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   autoStartService: false,
   setupCompletedAt: null,
   setupVersion: null,
-  autoRepairEnabled: false
+  autoRepairEnabled: false,
+  huggingFaceToken: "",
+  diarizationEnabled: true,
+  diarizationModelId: "pyannote/speaker-diarization-community-1"
 };
 
 export const DEFAULT_SETTINGS_RESPONSE: SettingsResponse = {

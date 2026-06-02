@@ -183,7 +183,11 @@ function normalizeSettings(settings: CompanionSettings): CompanionSettings {
     autoStartService: Boolean(settings.autoStartService),
     setupCompletedAt: settings.setupCompletedAt ?? null,
     setupVersion: settings.setupVersion?.trim() || null,
-    autoRepairEnabled: Boolean(settings.autoRepairEnabled)
+    autoRepairEnabled: Boolean(settings.autoRepairEnabled),
+    huggingFaceToken: settings.huggingFaceToken?.trim() || "",
+    diarizationEnabled: settings.diarizationEnabled ?? true,
+    diarizationModelId:
+      settings.diarizationModelId?.trim() || DEFAULT_COMPANION_SETTINGS.diarizationModelId
   };
 }
 

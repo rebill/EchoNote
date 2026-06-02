@@ -1,4 +1,5 @@
 import {
+  formatDiarizationStatus,
   formatExitCode,
   formatModelStatus,
   formatPid,
@@ -14,6 +15,7 @@ export function createRuntimeSummary(setup: SetupResponse): HTMLElement {
     createKeyValue("Service", formatServiceStatus(state.serviceStatus)),
     createKeyValue("Model", state.resolvedModelId),
     createKeyValue("Model status", formatModelStatus(state.modelStatus)),
+    createKeyValue("Speaker diarization", formatDiarizationStatus(state.diarizationStatus)),
     createKeyValue("API", state.baseUrl ?? "Unavailable"),
     createKeyValue("PID", formatPid(state.pid)),
     createKeyValue("Last exit", formatExitCode(state.lastExitCode))

@@ -23,6 +23,15 @@ pub enum ModelStatus {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiarizationStatus {
+    Disabled,
+    Available,
+    Unavailable,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompanionAppState {
@@ -32,6 +41,8 @@ pub struct CompanionAppState {
     pid: Option<u32>,
     resolved_model_id: String,
     backend: Backend,
+    diarization_status: DiarizationStatus,
+    diarization_model_id: String,
     last_error: Option<String>,
     last_exit_code: Option<i32>,
     recent_logs: Vec<String>,
@@ -49,6 +60,8 @@ pub(crate) struct RuntimeState {
     pub pid: Option<u32>,
     pub resolved_model_id: String,
     pub backend: Backend,
+    pub diarization_status: DiarizationStatus,
+    pub diarization_model_id: String,
     pub last_error: Option<String>,
     pub last_exit_code: Option<i32>,
     pub recent_logs: Vec<String>,
@@ -64,6 +77,12 @@ impl RuntimeState {
             pid: None,
             resolved_model_id: settings.resolved_model_id(),
             backend: settings.backend,
+            diarization_status: if settings.diarization_enabled {
+                DiarizationStatus::Unavailable
+            } else {
+                DiarizationStatus::Disabled
+            },
+            diarization_model_id: settings.diarization_model_id.clone(),
             last_error: None,
             last_exit_code: None,
             recent_logs: vec![
@@ -88,6 +107,8 @@ impl CompanionAppState {
             pid: runtime.pid,
             resolved_model_id: runtime.resolved_model_id,
             backend: runtime.backend,
+            diarization_status: runtime.diarization_status,
+            diarization_model_id: runtime.diarization_model_id,
             last_error: runtime.last_error,
             last_exit_code: runtime.last_exit_code,
             recent_logs: runtime.recent_logs,

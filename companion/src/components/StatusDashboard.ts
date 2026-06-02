@@ -1,4 +1,5 @@
 import {
+  formatDiarizationStatus,
   formatExitCode,
   formatModelStatus,
   formatPid,
@@ -64,6 +65,7 @@ function createStatusBand(state: CompanionAppState): HTMLElement {
   band.append(
     createMetric("Service", formatServiceStatus(state.serviceStatus), state.serviceStatus),
     createMetric("Model", formatModelStatus(state.modelStatus), state.modelStatus),
+    createMetric("Speakers", formatDiarizationStatus(state.diarizationStatus), state.diarizationStatus),
     createMetric("API", state.baseUrl ?? "Unavailable", state.baseUrl ? "running" : "stopped"),
     createMetric("PID", formatPid(state.pid), state.pid ? "running" : "stopped")
   );
@@ -93,6 +95,8 @@ function createRuntimePanel(state: CompanionAppState): HTMLElement {
   panel.append(
     createKeyValue("Model", state.resolvedModelId),
     createKeyValue("Model status", formatModelStatus(state.modelStatus)),
+    createKeyValue("Speaker diarization", formatDiarizationStatus(state.diarizationStatus)),
+    createKeyValue("Diarization model", state.diarizationModelId),
     createKeyValue("Discovery", state.discoveryPath),
     createKeyValue("Settings", state.settingsPath),
     createKeyValue("Logs", state.logsPath)
@@ -192,7 +196,7 @@ function createLogPanel(state: CompanionAppState): HTMLElement {
 function createMetric(
   label: string,
   value: string,
-  tone: ServiceStatus | ModelStatus
+  tone: ServiceStatus | ModelStatus | CompanionAppState["diarizationStatus"]
 ): HTMLElement {
   const metric = createElement("article", `metric metric-${tone}`);
   metric.append(createElement("span", "metric-label", label));

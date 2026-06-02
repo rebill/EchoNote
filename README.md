@@ -8,6 +8,8 @@ MVP scope:
 - Local ASR with MLX.
 - Optional macOS EchoNote desktop app to start, stop, monitor, and diagnose the local ASR service.
 - Quasi-real-time chunk transcription.
+- Silence-aware live chunking to reduce sentence cuts.
+- Optional local anonymous speaker labels in final transcripts.
 - Markdown meeting notes in your Obsidian vault.
 - OpenAI-compatible and Anthropic summary providers.
 - Optional virtual audio input support through BlackHole or Loopback.
@@ -42,7 +44,7 @@ python3 -m venv asr-service/.venv
 source asr-service/.venv/bin/activate
 
 pip install --upgrade pip
-pip install -e 'asr-service[mlx]'
+pip install -e 'asr-service[mlx,diarization]'
 ```
 
 Verify real ASR:
@@ -112,7 +114,8 @@ npm run tauri:dev
 3. Click `Set Up EchoNote`.
 4. Wait for the setup steps to find Python, prepare `asr-service/.venv`, install fake-backend-safe dependencies, and start the local service.
 5. Use `Advanced Settings` only for custom Python paths, ports, backend, or model IDs.
-6. Confirm EchoNote shows `Service: Running` and writes discovery to:
+6. Optional: configure a Hugging Face token for local speaker diarization with `pyannote/speaker-diarization-community-1`.
+7. Confirm EchoNote shows `Service: Running` and writes discovery to:
 
 ```text
 ~/Library/Application Support/EchoNote/companion.json
@@ -218,6 +221,9 @@ For a mixed source containing both your microphone and meeting software output, 
 - [v0.3.0 Setup Wizard PRD](docs/V0_3_0_SETUP_WIZARD_PRD.md)
 - [v0.3.0 Setup Wizard Technical Design](docs/V0_3_0_SETUP_WIZARD_TECH_DESIGN.md)
 - [v0.3.0 Setup Wizard Tasks](docs/V0_3_0_SETUP_WIZARD_TASKS.md)
+- [v0.4.0 Smart Chunking And Speaker Diarization PRD](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_PRD.md)
+- [v0.4.0 Smart Chunking And Speaker Diarization Technical Design](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_TECH_DESIGN.md)
+- [v0.4.0 Smart Chunking And Speaker Diarization Tasks](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_TASKS.md)
 - [v0.2.0 Tauri ASR Companion PRD](docs/V0_2_0_TAURI_COMPANION_PRD.md)
 - [v0.2.0 Tauri ASR Companion Technical Design](docs/V0_2_0_TAURI_COMPANION_TECH_DESIGN.md)
 - [v0.2.0 Tauri ASR Companion Tasks](docs/V0_2_0_TAURI_COMPANION_TASKS.md)
@@ -234,6 +240,7 @@ For a mixed source containing both your microphone and meeting software output, 
 ## Privacy
 
 - ASR transcription runs locally.
+- Speaker diarization runs locally when configured.
 - Meeting audio is not sent to cloud ASR providers.
 - Raw audio is not saved by default.
 - If AI summary uses a cloud LLM provider, the transcript is sent to that provider.

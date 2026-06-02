@@ -29,7 +29,19 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
         asr_service_path.as_deref(),
         settings.backend,
     );
-    let dependencies_step = dependencies_step(dependencies_ready, python_path.as_deref());
+    let diarization_dependency_ready =
+        probe_python_import(
+            python_path.as_deref(),
+            asr_service_path.as_deref(),
+            "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyannote.audio') else 1)",
+        );
+    let dependencies_step = dependencies_step(
+        dependencies_ready,
+        python_path.as_deref(),
+        settings.diarization_enabled,
+        diarization_dependency_ready,
+        !settings.hugging_face_token.trim().is_empty(),
+    );
     let existing_service_healthy =
         process::request_existing_asr_health(settings.preferred_port).is_ok();
     let port_available = existing_service_healthy || port_is_available(settings.preferred_port);
@@ -279,15 +291,31 @@ pub(crate) fn probe_dependencies(
         .is_ok_and(|status| status.success())
 }
 
-fn dependencies_step(ready: bool, python_path: Option<&str>) -> SetupStep {
+fn dependencies_step(
+    ready: bool,
+    python_path: Option<&str>,
+    diarization_enabled: bool,
+    diarization_dependency_ready: bool,
+    hugging_face_token_configured: bool,
+) -> SetupStep {
     if ready {
-        return SetupStep::new(
+        let mut step = SetupStep::new(
             SetupStepId::Dependencies,
             "Install Dependencies",
             SetupStepStatus::Passed,
             "ASR dependencies are installed.",
             true,
         );
+        if diarization_enabled {
+            let detail = match (diarization_dependency_ready, hugging_face_token_configured) {
+                (true, true) => "Speaker diarization dependency and Hugging Face token are configured.",
+                (true, false) => "Speaker diarization dependency is installed; Hugging Face token is not configured.",
+                (false, true) => "Hugging Face token is configured; optional pyannote dependency is not installed.",
+                (false, false) => "Speaker diarization is optional; pyannote dependency or Hugging Face token is missing.",
+            };
+            step = step.with_detail(detail);
+        }
+        return step;
     }
 
     let status = if python_path.is_some() {
@@ -302,6 +330,19 @@ fn dependencies_step(ready: bool, python_path: Option<&str>) -> SetupStep {
         "ASR dependencies need to be installed or repaired.",
         true,
     )
+}
+
+fn probe_python_import(python_path: Option<&str>, service_dir: Option<&Path>, script: &str) -> bool {
+    let (Some(python_path), Some(service_dir)) = (python_path, service_dir) else {
+        return false;
+    };
+
+    Command::new(python_path)
+        .current_dir(service_dir)
+        .arg("-c")
+        .arg(script)
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn port_step(port: u16, available: bool, existing_service_healthy: bool) -> SetupStep {

@@ -1,5 +1,5 @@
 use crate::settings::Backend;
-use crate::state::{ModelStatus, RuntimeState, ServiceStatus};
+use crate::state::{DiarizationStatus, ModelStatus, RuntimeState, ServiceStatus};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -32,6 +32,14 @@ struct CompanionDiscovery {
     model_status: ModelStatus,
     pid: Option<u32>,
     updated_at: String,
+    capabilities: CompanionCapabilities,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompanionCapabilities {
+    adaptive_chunking: bool,
+    speaker_diarization: DiarizationStatus,
 }
 
 impl DiscoveryWriter {
@@ -99,6 +107,10 @@ impl CompanionDiscovery {
             updated_at: OffsetDateTime::now_utc()
                 .format(&Rfc3339)
                 .map_err(|error| format!("Failed to format discovery timestamp: {error}"))?,
+            capabilities: CompanionCapabilities {
+                adaptive_chunking: true,
+                speaker_diarization: runtime.diarization_status,
+            },
         })
     }
 }
@@ -137,6 +149,11 @@ mod tests {
         assert_eq!(discovery["modelId"], "mlx-community/Qwen3-ASR-0.6B-4bit");
         assert_eq!(discovery["modelStatus"], "not_loaded");
         assert_eq!(discovery["pid"], 1234);
+        assert_eq!(discovery["capabilities"]["adaptiveChunking"], true);
+        assert_eq!(
+            discovery["capabilities"]["speakerDiarization"],
+            "unavailable"
+        );
         assert!(discovery["updatedAt"]
             .as_str()
             .unwrap_or_default()

@@ -8,6 +8,12 @@ import { AsrServiceClient } from "./asr-service-client";
 export type CompanionServiceStatus = "stopped" | "starting" | "running" | "stopping" | "error";
 export type CompanionBackend = "fake" | "mlx-audio";
 export type CompanionModelStatus = "not_loaded" | "loading" | "ready" | "error" | "unknown";
+export type CompanionSpeakerDiarizationStatus = "available" | "unavailable" | "disabled" | "failed" | "error";
+
+export type CompanionCapabilities = {
+  adaptiveChunking?: boolean;
+  speakerDiarization?: CompanionSpeakerDiarizationStatus;
+};
 
 export type CompanionDiscovery = {
   version: 1;
@@ -22,6 +28,7 @@ export type CompanionDiscovery = {
   modelStatus: CompanionModelStatus;
   pid: number | null;
   updatedAt: string;
+  capabilities?: CompanionCapabilities;
 };
 
 export type CompanionResolution =
@@ -55,7 +62,8 @@ const COMPANION_DISCOVERY_KEYS = [
   "modelId",
   "modelStatus",
   "pid",
-  "updatedAt"
+  "updatedAt",
+  "capabilities"
 ] as const;
 
 const COMPANION_SERVICE_STATUSES = new Set<CompanionServiceStatus>([
@@ -194,6 +202,9 @@ export function validateCompanionDiscovery(value: unknown): ValidationResult {
   if (typeof value.updatedAt !== "string" || Number.isNaN(Date.parse(value.updatedAt))) {
     return { ok: false, reason: "Discovery updatedAt must be a valid ISO timestamp." };
   }
+  if (value.capabilities !== undefined && !isValidCapabilities(value.capabilities)) {
+    return { ok: false, reason: "Discovery capabilities are invalid." };
+  }
 
   return { ok: true, discovery: value as CompanionDiscovery };
 }
@@ -253,6 +264,22 @@ function validateEndpointConsistency(discovery: CompanionDiscovery): { ok: true 
   return { ok: true };
 }
 
+function isValidCapabilities(value: unknown): value is CompanionCapabilities {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.adaptiveChunking !== undefined && typeof value.adaptiveChunking !== "boolean") {
+    return false;
+  }
+  if (
+    value.speakerDiarization !== undefined &&
+    !["available", "unavailable", "disabled", "failed", "error"].includes(String(value.speakerDiarization))
+  ) {
+    return false;
+  }
+  return Object.keys(value).every((key) => key === "adaptiveChunking" || key === "speakerDiarization");
+}
+
 async function checkCompanionHealth(baseUrl: string): Promise<void> {
   const health = await new AsrServiceClient(baseUrl).health();
   if (health.status !== "ok") {
@@ -270,6 +297,9 @@ function normalizeMaxAgeSeconds(maxAgeSeconds: number): number {
 function validateExactKeys(value: Record<string, unknown>): { ok: true } | { ok: false; reason: string } {
   const expectedKeys = new Set<string>(COMPANION_DISCOVERY_KEYS);
   for (const key of COMPANION_DISCOVERY_KEYS) {
+    if (key === "capabilities") {
+      continue;
+    }
     if (!(key in value)) {
       return { ok: false, reason: `Discovery is missing required field ${key}.` };
     }

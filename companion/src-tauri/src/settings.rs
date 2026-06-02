@@ -6,6 +6,7 @@ use tauri::Manager;
 const SETTINGS_FILE_NAME: &str = "companion-settings.json";
 const DEFAULT_MODEL_QWEN3_0_6B: &str = "mlx-community/Qwen3-ASR-0.6B-4bit";
 const DEFAULT_MODEL_QWEN3_1_7B: &str = "mlx-community/Qwen3-ASR-1.7B-4bit";
+const DEFAULT_DIARIZATION_MODEL: &str = "pyannote/speaker-diarization-community-1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -49,6 +50,9 @@ pub struct CompanionSettings {
     pub setup_completed_at: Option<String>,
     pub setup_version: Option<String>,
     pub auto_repair_enabled: bool,
+    pub hugging_face_token: String,
+    pub diarization_enabled: bool,
+    pub diarization_model_id: String,
 }
 
 impl Default for CompanionSettings {
@@ -64,6 +68,9 @@ impl Default for CompanionSettings {
             setup_completed_at: None,
             setup_version: None,
             auto_repair_enabled: false,
+            hugging_face_token: String::new(),
+            diarization_enabled: true,
+            diarization_model_id: DEFAULT_DIARIZATION_MODEL.to_string(),
         }
     }
 }
@@ -76,6 +83,9 @@ impl CompanionSettings {
         self.asr_service_path =
             trimmed_or_default(self.asr_service_path, defaults.asr_service_path);
         self.custom_model_id = self.custom_model_id.trim().to_string();
+        self.hugging_face_token = self.hugging_face_token.trim().to_string();
+        self.diarization_model_id =
+            trimmed_or_default(self.diarization_model_id, defaults.diarization_model_id);
         self.setup_completed_at = self
             .setup_completed_at
             .map(|value| value.trim().to_string())
@@ -273,6 +283,9 @@ mod tests {
             setup_completed_at: Some(" ".to_string()),
             setup_version: Some(" 0.3.0 ".to_string()),
             auto_repair_enabled: true,
+            hugging_face_token: " hf-token ".to_string(),
+            diarization_enabled: true,
+            diarization_model_id: " ".to_string(),
         }
         .normalized();
 
@@ -285,6 +298,12 @@ mod tests {
         assert_eq!(settings.setup_completed_at, None);
         assert_eq!(settings.setup_version.as_deref(), Some("0.3.0"));
         assert!(settings.auto_repair_enabled);
+        assert_eq!(settings.hugging_face_token, "hf-token");
+        assert!(settings.diarization_enabled);
+        assert_eq!(
+            settings.diarization_model_id,
+            "pyannote/speaker-diarization-community-1"
+        );
     }
 
     #[test]
@@ -307,6 +326,9 @@ mod tests {
                 setup_completed_at: Some("2026-05-21T00:00:00Z".to_string()),
                 setup_version: Some("0.3.0".to_string()),
                 auto_repair_enabled: true,
+                hugging_face_token: "hf_secret".to_string(),
+                diarization_enabled: true,
+                diarization_model_id: "pyannote/custom".to_string(),
                 ..CompanionSettings::default()
             })
             .expect("save settings");
@@ -320,6 +342,8 @@ mod tests {
         assert_eq!(reloaded.settings.python_path, "/usr/bin/python3");
         assert_eq!(reloaded.settings.backend, Backend::MlxAudio);
         assert_eq!(reloaded.settings.setup_version.as_deref(), Some("0.3.0"));
+        assert_eq!(reloaded.settings.hugging_face_token, "hf_secret");
+        assert_eq!(reloaded.settings.diarization_model_id, "pyannote/custom");
 
         fs::write(&path, "{not-json").expect("write invalid json");
         let recovered = store.load_or_default().expect("recover default settings");
