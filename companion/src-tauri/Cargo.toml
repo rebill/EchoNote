@@ -1,0 +1,21 @@
+[package]
+name = "echonote"
+version = "0.4.0"
+description = "EchoNote desktop app for ASR runtime management."
+authors = ["EchoNote Contributors"]
+edition = "2021"
+rust-version = "1.77"
+build = "build.rs"
+
+[lib]
+name = "echonote_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+time = { version = "0.3", features = ["formatting"] }

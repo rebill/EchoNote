@@ -6,7 +6,7 @@ import wave
 from fastapi import HTTPException, UploadFile, status
 
 
-MAX_WAV_BYTES = 25 * 1024 * 1024
+MAX_WAV_BYTES = 512 * 1024 * 1024
 ALLOWED_WAV_CONTENT_TYPES = {
     None,
     "",

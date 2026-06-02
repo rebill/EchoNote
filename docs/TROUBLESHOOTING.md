@@ -17,9 +17,64 @@ curl http://127.0.0.1:8765/health
 
 If this works in terminal but Obsidian still shows `Failed to fetch`, restart the ASR service and make sure the current code includes CORS middleware.
 
+## EchoNote desktop is not discovered
+
+The Obsidian plugin uses EchoNote desktop only when the discovery file is present, valid, fresh, and points to a healthy localhost ASR service. There is no plugin-side Manual fallback.
+
+Check the discovery file:
+
+```bash
+cat "$HOME/Library/Application Support/EchoNote/companion.json"
+```
+
+Then check the discovered ASR endpoint:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Common causes:
+
+- EchoNote is not open.
+- The desktop service is not `running`.
+- `updatedAt` is older than 30 seconds.
+- The ASR service is running on a different port than the plugin expects.
+- The discovery file contains an invalid `baseUrl`, `host`, or `port`.
+
+## EchoNote shows unavailable, stale, or invalid discovery
+
+EchoNote requires a usable desktop-managed endpoint.
+
+Use EchoNote desktop first:
+
+1. Click `Set Up EchoNote` on first run, or `Start Service` when setup is ready.
+2. Wait for `Service: Running`.
+3. Confirm the API URL is `http://127.0.0.1:<port>`.
+4. Open `Advanced Settings` only if Python path, ASR service path, port, backend, or model ID needs manual repair.
+5. Click `Copy Diagnostic Report` if the service enters `Error`.
+
+Logs are expected at:
+
+```text
+~/Library/Logs/EchoNote/companion.log
+~/Library/Logs/EchoNote/asr-service.log
+```
+
+If the discovery file is stale, open EchoNote and click `Restart Service`. If discovery is invalid, delete the stale file only after EchoNote is closed, then start EchoNote again:
+
+```bash
+rm "$HOME/Library/Application Support/EchoNote/companion.json"
+```
+
+## Setup or desktop diagnostics are needed for an issue
+
+In EchoNote, click `Copy Diagnostic Report` and paste the Markdown report into the GitHub issue.
+
+The report should include setup step summaries, Python candidate summaries, service status, model status, backend, model ID, base URL, Python path, ASR service path, last exit code, and recent logs. It should not include API keys, LLM tokens, transcript text, or audio content.
+
 ## Python path error
 
-Use an absolute Python path in EchoNote settings:
+Most users should click `Repair EchoNote`. If manual repair is needed, open `Advanced Settings` and use an absolute Python path:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service/.venv/bin/python
@@ -29,7 +84,7 @@ Do not rely on `python3` unless you know Obsidian can resolve the same shell env
 
 ## ASR service path error
 
-Use an absolute ASR service path:
+Most users should click `Repair EchoNote`. If manual repair is needed, open `Advanced Settings` and use an absolute ASR service path:
 
 ```text
 /Users/br/Git/github/rebill/EchoNote/asr-service
@@ -88,6 +143,30 @@ Fix:
 - Rebuild and reload the plugin if needed.
 
 Current code skips empty ASR text and does not write `STTOutput(...)` to the note.
+
+## Speaker diarization is unavailable
+
+Speaker labels are optional. Missing diarization must not block recording, live transcription, or summaries.
+
+Check:
+
+```bash
+curl http://127.0.0.1:8765/diarization/status
+```
+
+Common causes:
+
+- Hugging Face token is not configured in EchoNote desktop Advanced Settings.
+- `pyannote.audio` is not installed. Install with `pip install -e 'asr-service[diarization]'` or run `Repair EchoNote`.
+- The Hugging Face account has not accepted the `pyannote/speaker-diarization-community-1` model terms.
+
+If diarization fails during `Stop Meeting`, EchoNote keeps the live transcript and shows a non-blocking notice.
+
+## Final transcript has no speaker labels
+
+This is expected when diarization is disabled, unavailable, or failed. The final transcript can still replace the live transcript with cleaned turns, but `speaker` remains empty.
+
+Check the EchoNote desktop Runtime panel for `Speaker diarization`. If it is `Unavailable`, configure the Hugging Face token and install the diarization dependencies.
 
 ## No meeting note is created
 
@@ -155,4 +234,3 @@ Check:
 - The meeting note contains a non-empty `## Transcript` section.
 
 EchoNote does not write summary sections if the LLM response cannot be parsed as JSON.
-

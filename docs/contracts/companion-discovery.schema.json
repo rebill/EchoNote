@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rebill/EchoNote/blob/main/docs/contracts/companion-discovery.schema.json",
+  "title": "EchoNote Companion Discovery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "app",
+    "service",
+    "status",
+    "baseUrl",
+    "host",
+    "port",
+    "backend",
+    "modelId",
+    "modelStatus",
+    "pid",
+    "updatedAt"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "app": {
+      "const": "EchoNote"
+    },
+    "service": {
+      "const": "echonote-asr"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["stopped", "starting", "running", "stopping", "error"]
+    },
+    "baseUrl": {
+      "type": "string",
+      "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}$"
+    },
+    "host": {
+      "const": "127.0.0.1"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["fake", "mlx-audio"]
+    },
+    "modelId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "modelStatus": {
+      "type": "string",
+      "enum": ["not_loaded", "loading", "ready", "error", "unknown"]
+    },
+    "pid": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adaptiveChunking": {
+          "type": "boolean"
+        },
+        "speakerDiarization": {
+          "type": "string",
+          "enum": ["available", "unavailable", "disabled", "failed", "error"]
+        }
+      }
+    }
+  }
+}

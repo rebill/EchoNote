@@ -19,6 +19,7 @@ Build output:
 ```text
 main.js
 manifest.json
+styles.css
 ```
 
 ## Type Check
@@ -27,11 +28,23 @@ manifest.json
 npm run typecheck
 ```
 
+## ASR Runtime
+
+EchoNote uses the EchoNote desktop app as the only ASR backend. The Obsidian plugin no longer starts or restarts its own Python ASR process.
+
+The default discovery file is:
+
+```text
+~/Library/Application Support/EchoNote/companion.json
+```
+
+Start, stop, restart, model loading, and ASR logs are managed in the EchoNote desktop app. The plugin only reads the discovery file and calls the EchoNote-managed localhost ASR API. If discovery is missing, open EchoNote and click `Set Up EchoNote` or `Start Service`.
+
 ## Manual Vault Install
 
 ```bash
 mkdir -p "/path/to/Vault/.obsidian/plugins/echonote"
-cp main.js manifest.json "/path/to/Vault/.obsidian/plugins/echonote/"
+cp main.js manifest.json styles.css "/path/to/Vault/.obsidian/plugins/echonote/"
 ```
 
 Reload Obsidian or disable/enable EchoNote after copying.

@@ -1,10 +1,14 @@
 node_modules/
 dist/
 main.js
+.test-dist/
 .venv/
 asr-service/.venv/
+target/
+companion/src-tauri/gen/
 
 __pycache__/
 *.py[cod]
+*.egg-info/
 
 .DS_Store

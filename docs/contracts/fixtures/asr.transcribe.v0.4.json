@@ -1,0 +1,18 @@
+{
+  "chunk_id": "chunk_000012",
+  "text": "我们今天主要讨论 EchoNote 第一版的范围。",
+  "turns": [
+    {
+      "id": "chunk_000012-turn-001",
+      "text": "我们今天主要讨论 EchoNote 第一版的范围。",
+      "speaker": null,
+      "started_at_ms": 180000,
+      "ended_at_ms": 195000,
+      "confidence": null
+    }
+  ],
+  "started_at_ms": 180000,
+  "ended_at_ms": 195000,
+  "language": "zh",
+  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit"
+}

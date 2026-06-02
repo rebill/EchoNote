@@ -1,2 +1,0 @@
-[console_scripts]
-echonote-asr = echonote_asr.__main__:main

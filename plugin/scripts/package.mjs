@@ -10,6 +10,7 @@ await mkdir(outDir, { recursive: true });
 
 await copyFile(resolve(pluginDir, "main.js"), resolve(outDir, "main.js"));
 await copyFile(resolve(pluginDir, "manifest.json"), resolve(outDir, "manifest.json"));
+await copyFile(resolve(pluginDir, "styles.css"), resolve(outDir, "styles.css"));
 await copyFile(resolve(pluginDir, "README.md"), resolve(outDir, "README.md"));
 
 console.log(`Packaged EchoNote plugin to ${outDir}`);

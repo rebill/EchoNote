@@ -56,11 +56,11 @@ npm run package
 
 ## Manual Plugin Test
 
-Build the plugin, then copy `plugin/main.js` and `plugin/manifest.json` into a test vault:
+Build the plugin, then copy `plugin/main.js`, `plugin/manifest.json`, and `plugin/styles.css` into a test vault:
 
 ```bash
 mkdir -p "/path/to/TestVault/.obsidian/plugins/echonote"
-cp plugin/main.js plugin/manifest.json "/path/to/TestVault/.obsidian/plugins/echonote/"
+cp plugin/main.js plugin/manifest.json plugin/styles.css "/path/to/TestVault/.obsidian/plugins/echonote/"
 ```
 
 Reload Obsidian or disable and re-enable EchoNote.

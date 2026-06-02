@@ -1,11 +1,12 @@
 import { Notice, Plugin, TFile } from "obsidian";
 import { AudioRecorder } from "./audio/audio-recorder";
-import { AsrProcessManager } from "./asr/asr-process-manager";
+import { resolveCompanionDiscovery } from "./asr/companion-discovery";
 import { MeetingNoteWriter } from "./meeting/meeting-note-writer";
 import { MeetingSessionController } from "./meeting/meeting-session";
 import { SummaryService } from "./llm/summary-service";
 import { EchoNoteSettingTab } from "./settings/settings-tab";
-import { DEFAULT_SETTINGS, resolveAsrModelId, type EchoNoteSettings } from "./settings/settings";
+import { DEFAULT_SETTINGS, type EchoNoteSettings } from "./settings/settings";
+import { createCompanionResolutionStatus, createInitialRuntimeStatus } from "./status/companion-status";
 import { StatusStore } from "./status/status-store";
 import { ECHONOTE_STATUS_VIEW_TYPE, EchoNoteStatusView } from "./status/status-view";
 import { createEchoNoteError } from "./utils/errors";
@@ -15,7 +16,6 @@ export default class EchoNotePlugin extends Plugin {
   statusStore = new StatusStore();
   readonly audioRecorder = new AudioRecorder();
   private noteWriter: MeetingNoteWriter | null = null;
-  private asrProcessManager: AsrProcessManager | null = null;
   private meetingSession: MeetingSessionController | null = null;
   private summaryService = new SummaryService();
 
@@ -23,31 +23,15 @@ export default class EchoNotePlugin extends Plugin {
     await this.loadSettings();
 
     this.statusStore = new StatusStore({
-      selectedModel: resolveAsrModelId(this.settings),
-      selectedAudioInput: this.settings.audioInputDeviceLabel
+      selectedAudioInput: this.settings.audioInputDeviceLabel,
+      ...createInitialRuntimeStatus(this.settings)
     });
     this.noteWriter = new MeetingNoteWriter(this.app);
-    this.asrProcessManager = new AsrProcessManager(
-      this,
-      () => {
-        this.statusStore.setState({ asrService: "running" });
-      },
-      (code, signal) => {
-        this.statusStore.setState({
-          asrService: "not_started",
-          model: "not_loaded"
-        });
-        if (code !== 0 && signal !== "SIGTERM") {
-          new Notice(`EchoNote ASR service exited: ${code ?? signal ?? "unknown"}`);
-        }
-      }
-    );
     this.meetingSession = new MeetingSessionController({
       getSettings: () => this.settings,
       statusStore: this.statusStore,
       audioRecorder: this.audioRecorder,
-      noteWriter: this.noteWriter,
-      asrProcessManager: this.asrProcessManager
+      noteWriter: this.noteWriter
     });
 
     this.registerView(ECHONOTE_STATUS_VIEW_TYPE, (leaf) => new EchoNoteStatusView(leaf, this));
@@ -62,19 +46,45 @@ export default class EchoNotePlugin extends Plugin {
 
   async onunload(): Promise<void> {
     await this.meetingSession?.stop();
-    await this.asrProcessManager?.stop();
     this.app.workspace.detachLeavesOfType(ECHONOTE_STATUS_VIEW_TYPE);
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = {
+    const loadedSettings = ((await this.loadData()) ?? {}) as Record<string, unknown>;
+    const settings = {
       ...DEFAULT_SETTINGS,
-      ...(await this.loadData())
-    };
+      ...loadedSettings,
+      asrRuntimeMode: "companion"
+    } as EchoNoteSettings & Record<string, unknown>;
+    const legacyKeys = [
+      "pythonPath",
+      "asrServicePath",
+      "asrServicePort",
+      "autoStartAsrService",
+      "asrModelPreset",
+      "customAsrModelId"
+    ];
+    const shouldPersistMigration =
+      (loadedSettings.asrRuntimeMode !== undefined && loadedSettings.asrRuntimeMode !== "companion")
+      || legacyKeys.some((key) => key in settings);
+
+    for (const key of legacyKeys) {
+      delete settings[key];
+    }
+
+    this.settings = settings;
+
+    if (shouldPersistMigration) {
+      await this.saveSettings();
+    }
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  syncRuntimeSettingsToStatus(): void {
+    this.statusStore.setState(createInitialRuntimeStatus(this.settings));
   }
 
   async openStatusView(): Promise<void> {
@@ -96,7 +106,7 @@ export default class EchoNotePlugin extends Plugin {
     void this.meetingSession?.requestMicrophonePermission();
   }
 
-  startAsrService(): void {
+  prepareCompanionAsr(): void {
     void this.meetingSession?.startAsrServiceOnly();
   }
 
@@ -120,8 +130,8 @@ export default class EchoNotePlugin extends Plugin {
     void this.summarizeMeeting();
   }
 
-  restartAsrService(): void {
-    void this.meetingSession?.restartAsrService();
+  refreshCompanionStatus(): void {
+    void this.refreshCompanionStatusInternal();
   }
 
   private registerCommands(): void {
@@ -164,10 +174,28 @@ export default class EchoNotePlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "echonote-restart-asr-service",
-      name: "Restart ASR Service",
-      callback: () => this.restartAsrService()
+      id: "echonote-prepare-companion-asr",
+      name: "Prepare Companion ASR",
+      callback: () => this.prepareCompanionAsr()
     });
+
+    this.addCommand({
+      id: "echonote-refresh-companion-status",
+      name: "Refresh Companion Status",
+      callback: () => this.refreshCompanionStatus()
+    });
+  }
+
+  private async refreshCompanionStatusInternal(): Promise<void> {
+    const resolution = await resolveCompanionDiscovery(this.settings);
+    this.statusStore.setState(createCompanionResolutionStatus(this.settings, resolution));
+
+    if (resolution.kind === "available") {
+      new Notice("EchoNote desktop runtime is available.");
+      return;
+    }
+
+    new Notice(`EchoNote desktop runtime status: ${resolution.kind}`);
   }
 
   private async summarizeMeeting(): Promise<void> {

@@ -1,12 +1,10 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type EchoNotePlugin from "../main";
 import {
-  ASR_MODEL_QWEN3_0_6B_4BIT,
-  ASR_MODEL_QWEN3_1_7B_4BIT,
-  type AsrModelPreset,
+  DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS,
+  DEFAULT_COMPANION_DISCOVERY_PATH,
   type ChunkLengthSeconds,
-  type LlmProviderType,
-  resolveAsrModelId
+  type LlmProviderType
 } from "./settings";
 
 export class EchoNoteSettingTab extends PluginSettingTab {
@@ -64,76 +62,42 @@ export class EchoNoteSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "ASR" });
 
     new Setting(containerEl)
-      .setName("ASR model")
-      .setDesc("Changing this requires restarting the ASR service.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption(ASR_MODEL_QWEN3_0_6B_4BIT, ASR_MODEL_QWEN3_0_6B_4BIT)
-          .addOption(ASR_MODEL_QWEN3_1_7B_4BIT, ASR_MODEL_QWEN3_1_7B_4BIT)
-          .addOption("custom", "Custom MLX model ID")
-          .setValue(this.plugin.settings.asrModelPreset)
+      .setName("ASR backend")
+      .setDesc("EchoNote now uses the EchoNote desktop app only. Start, stop, restart, and configure the ASR service in the desktop app.");
+
+    new Setting(containerEl)
+      .setName("Companion discovery path")
+      .setDesc("Used to find the Companion-managed ASR endpoint.")
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_COMPANION_DISCOVERY_PATH)
+          .setValue(this.plugin.settings.companionDiscoveryPath)
           .onChange(async (value) => {
-            this.plugin.settings.asrModelPreset = value as AsrModelPreset;
-            this.plugin.statusStore.setState({ selectedModel: resolveAsrModelId(this.plugin.settings) });
+            this.plugin.settings.companionDiscoveryPath = value.trim() || DEFAULT_COMPANION_DISCOVERY_PATH;
             await this.plugin.saveSettings();
+            this.plugin.syncRuntimeSettingsToStatus();
           })
       );
 
     new Setting(containerEl)
-      .setName("Custom MLX model ID")
-      .setDesc("Used only when ASR model is set to custom.")
-      .addText((text) =>
+      .setName("Companion discovery max age")
+      .setDesc("Seconds before a Companion discovery file is treated as stale.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "1";
+        text.inputEl.step = "1";
         text
-          .setPlaceholder("mlx-community/...")
-          .setValue(this.plugin.settings.customAsrModelId)
+          .setPlaceholder(String(DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS))
+          .setValue(String(this.plugin.settings.companionDiscoveryMaxAgeSeconds))
           .onChange(async (value) => {
-            this.plugin.settings.customAsrModelId = value.trim();
-            this.plugin.statusStore.setState({ selectedModel: resolveAsrModelId(this.plugin.settings) });
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Python path")
-      .setDesc("Python executable used to start the local ASR service.")
-      .addText((text) =>
-        text
-          .setPlaceholder("python3")
-          .setValue(this.plugin.settings.pythonPath)
-          .onChange(async (value) => {
-            this.plugin.settings.pythonPath = value.trim() || "python3";
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("ASR service path")
-      .setDesc("Path to the local Python ASR service directory.")
-      .addText((text) =>
-        text
-          .setPlaceholder("../asr-service")
-          .setValue(this.plugin.settings.asrServicePath)
-          .onChange(async (value) => {
-            this.plugin.settings.asrServicePath = value.trim() || "../asr-service";
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("ASR service port")
-      .setDesc("Localhost port for the ASR service.")
-      .addText((text) =>
-        text
-          .setPlaceholder("8765")
-          .setValue(String(this.plugin.settings.asrServicePort))
-          .onChange(async (value) => {
-            const port = Number.parseInt(value, 10);
-            if (Number.isInteger(port) && port > 0 && port < 65536) {
-              this.plugin.settings.asrServicePort = port;
+            const maxAgeSeconds = Number.parseInt(value, 10);
+            if (Number.isInteger(maxAgeSeconds) && maxAgeSeconds > 0) {
+              this.plugin.settings.companionDiscoveryMaxAgeSeconds = maxAgeSeconds;
               await this.plugin.saveSettings();
+              this.plugin.syncRuntimeSettingsToStatus();
             }
-          })
-      );
+          });
+      });
 
     new Setting(containerEl)
       .setName("Audio chunk length")
