@@ -5,6 +5,7 @@ export type MicrophonePermissionStatus = "unknown" | "granted" | "denied";
 export type AsrServiceStatus = "not_started" | "starting" | "running" | "error";
 export type ModelStatus = "not_loaded" | "loading" | "ready" | "error" | "unknown";
 export type RecordingStatus = "idle" | "starting" | "recording" | "paused" | "stopping" | "error";
+export type SpeakerFinalizationStatus = "idle" | "running" | "succeeded" | "failed";
 export type ActiveAsrRuntime = "unknown" | "companion";
 export type CompanionStatus =
   | "unknown"
@@ -32,6 +33,8 @@ export type EchoNoteStatus = {
   currentMeetingTitle: string | null;
   pendingChunkCount: number;
   lastTranscriptAt: number | null;
+  speakerFinalization: SpeakerFinalizationStatus;
+  speakerFinalizationMessage: string | null;
   lastError: EchoNoteError | null;
 };
 
@@ -52,5 +55,7 @@ export const DEFAULT_STATUS: EchoNoteStatus = {
   currentMeetingTitle: null,
   pendingChunkCount: 0,
   lastTranscriptAt: null,
+  speakerFinalization: "idle",
+  speakerFinalizationMessage: null,
   lastError: null
 };

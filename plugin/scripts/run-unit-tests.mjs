@@ -11,7 +11,10 @@ const testFiles = [
   "tests/asr-service-client.test.ts",
   "tests/audio-chunker.test.ts",
   "tests/companion-discovery.test.ts",
-  "tests/markdown-sections.test.ts"
+  "tests/meeting-artifacts.test.ts",
+  "tests/markdown-sections.test.ts",
+  "tests/silence-detection.test.ts",
+  "tests/transcript-corrections.test.ts"
 ];
 
 for (const testFile of testFiles) {

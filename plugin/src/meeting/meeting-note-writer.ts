@@ -5,7 +5,14 @@ import { formatClockTime, formatMeetingTitle, formatTranscriptTimestamp, sanitiz
 import type { MeetingSummary } from "../llm/llm-types";
 import { extractTranscript, replaceMeetingEndTime, replaceSummarySections, replaceTranscriptSection } from "./markdown-sections";
 import { renderMeetingTemplate } from "./meeting-template";
+import { applyTranscriptCorrections } from "./transcript-corrections";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
+import {
+  getMeetingArtifactBaseName,
+  getMeetingAudioFolder,
+  getSegmentsPathForAudioPath,
+  normalizeVaultPath
+} from "./meeting-artifacts";
 
 type CreateMeetingOptions = {
   settings: EchoNoteSettings;
@@ -39,13 +46,18 @@ export class MeetingNoteWriter {
     return {
       file,
       title,
-      audioFolder: normalizePath(`${options.settings.audioSaveFolder || "Meetings/audio"}/${title}`)
+      audioFolder: getMeetingAudioFolder(options.settings, title)
     };
   }
 
-  async appendTranscript(file: TFile, segment: TranscriptSegment, enableTimestamps: boolean): Promise<void> {
+  async appendTranscript(
+    file: TFile,
+    segment: TranscriptSegment,
+    enableTimestamps: boolean,
+    correctionRules: string
+  ): Promise<void> {
     const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(segment.started_at_ms)}] ` : "";
-    const text = sanitizeTranscriptText(segment.text);
+    const text = applyTranscriptCorrections(sanitizeTranscriptText(segment.text), correctionRules);
     if (!text) {
       return;
     }
@@ -53,8 +65,13 @@ export class MeetingNoteWriter {
     await this.app.vault.append(file, `\n${timestamp}${text}\n`);
   }
 
-  async replaceTranscript(file: TFile, turns: TranscriptTurn[], enableTimestamps: boolean): Promise<void> {
-    const rendered = formatTranscriptTurns(turns, enableTimestamps);
+  async replaceTranscript(
+    file: TFile,
+    turns: TranscriptTurn[],
+    enableTimestamps: boolean,
+    correctionRules: string
+  ): Promise<void> {
+    const rendered = formatTranscriptTurns(turns, enableTimestamps, correctionRules);
     if (!rendered) {
       return;
     }
@@ -71,12 +88,41 @@ export class MeetingNoteWriter {
     }
   }
 
-  async saveMeetingAudio(folder: string, meetingTitle: string, wavBytes: ArrayBuffer): Promise<void> {
+  async saveMeetingAudio(folder: string, meetingTitle: string, wavBytes: ArrayBuffer): Promise<string> {
     const normalizedFolder = normalizePath(folder || `Meetings/audio/${meetingTitle}`);
     await this.ensureFolder(normalizedFolder);
-    const safeTitle = sanitizeFileName(meetingTitle);
+    const safeTitle = getMeetingArtifactBaseName(meetingTitle);
     const path = await this.nextAvailablePath(normalizedFolder, `${safeTitle}.wav`);
     await this.app.vault.createBinary(path, wavBytes);
+    return path;
+  }
+
+  async saveMeetingSegments(audioPath: string, segments: TranscriptSegment[]): Promise<string> {
+    const path = getSegmentsPathForAudioPath(audioPath);
+    await this.createOrOverwriteText(path, JSON.stringify(segments, null, 2));
+    return path;
+  }
+
+  async readMeetingAudio(path: string): Promise<ArrayBuffer> {
+    const file = this.getVaultFile(path);
+    if (!file) {
+      throw new Error(`Saved meeting audio was not found: ${path}`);
+    }
+    return this.app.vault.readBinary(file);
+  }
+
+  async readMeetingSegments(path: string): Promise<TranscriptSegment[]> {
+    const file = this.getVaultFile(path);
+    if (!file) {
+      throw new Error(`Saved transcript segments were not found: ${path}`);
+    }
+
+    const content = await this.app.vault.read(file);
+    const parsed = JSON.parse(content) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error(`Saved transcript segments must be a JSON array: ${path}`);
+    }
+    return parsed as TranscriptSegment[];
   }
 
   async readTranscript(file: TFile): Promise<string> {
@@ -111,6 +157,27 @@ export class MeetingNoteWriter {
     }
   }
 
+  private async createOrOverwriteText(path: string, content: string): Promise<void> {
+    const normalizedPath = normalizeVaultPath(path);
+    const folder = normalizedPath.split("/").slice(0, -1).join("/");
+    if (folder) {
+      await this.ensureFolder(folder);
+    }
+
+    const existingFile = this.getVaultFile(normalizedPath);
+    if (existingFile) {
+      await this.app.vault.modify(existingFile, content);
+      return;
+    }
+
+    await this.app.vault.create(normalizedPath, content);
+  }
+
+  private getVaultFile(path: string): TFile | null {
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    return file instanceof TFile ? file : null;
+  }
+
   private async nextAvailablePath(folder: string, fileName: string): Promise<string> {
     const baseName = fileName.replace(/\.md$|\.wav$/i, "");
     const extension = fileName.endsWith(".wav") ? ".wav" : ".md";
@@ -142,10 +209,10 @@ function formatTasks(items: string[]): string {
   return normalized.map((item) => `- [ ] ${item}`).join("\n");
 }
 
-function formatTranscriptTurns(turns: TranscriptTurn[], enableTimestamps: boolean): string {
+function formatTranscriptTurns(turns: TranscriptTurn[], enableTimestamps: boolean, correctionRules: string): string {
   return turns
     .map((turn) => {
-      const text = sanitizeTranscriptText(turn.text);
+      const text = applyTranscriptCorrections(sanitizeTranscriptText(turn.text), correctionRules);
       if (!text) {
         return "";
       }

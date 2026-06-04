@@ -6,6 +6,9 @@ export type AsrRuntimeMode = "companion";
 
 export const DEFAULT_COMPANION_DISCOVERY_PATH = "~/Library/Application Support/EchoNote/companion.json";
 export const DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS = 30;
+export const DEFAULT_AUTO_STOP_SILENCE_MINUTES = 10;
+export const MIN_AUTO_STOP_SILENCE_MINUTES = 1;
+export const MAX_AUTO_STOP_SILENCE_MINUTES = 60;
 
 export type EchoNoteSettings = {
   meetingFolder: string;
@@ -17,9 +20,12 @@ export type EchoNoteSettings = {
   companionDiscoveryPath: string;
   companionDiscoveryMaxAgeSeconds: number;
   chunkLengthSeconds: ChunkLengthSeconds;
+  transcriptCorrectionRules: string;
 
   audioInputDeviceId: string;
   audioInputDeviceLabel: string;
+  autoStopOnSilence: boolean;
+  autoStopSilenceMinutes: number;
   saveRawAudio: boolean;
   audioSaveFolder: string;
 
@@ -77,9 +83,12 @@ export const DEFAULT_SETTINGS: EchoNoteSettings = {
   companionDiscoveryPath: DEFAULT_COMPANION_DISCOVERY_PATH,
   companionDiscoveryMaxAgeSeconds: DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS,
   chunkLengthSeconds: 15,
+  transcriptCorrectionRules: "",
 
   audioInputDeviceId: "default",
   audioInputDeviceLabel: "Default audio input",
+  autoStopOnSilence: true,
+  autoStopSilenceMinutes: DEFAULT_AUTO_STOP_SILENCE_MINUTES,
   saveRawAudio: false,
   audioSaveFolder: "Meetings/audio",
 
@@ -92,3 +101,11 @@ export const DEFAULT_SETTINGS: EchoNoteSettings = {
   summaryLanguage: "zh",
   summaryPrompt: DEFAULT_SUMMARY_PROMPT
 };
+
+export function normalizeAutoStopSilenceMinutes(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isInteger(parsed)) {
+    return DEFAULT_AUTO_STOP_SILENCE_MINUTES;
+  }
+  return Math.min(MAX_AUTO_STOP_SILENCE_MINUTES, Math.max(MIN_AUTO_STOP_SILENCE_MINUTES, parsed));
+}

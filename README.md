@@ -176,6 +176,12 @@ Companion discovery path:
 
 Audio input device:
 Default audio input / BlackHole / Loopback device
+
+Auto-stop on silence:
+Enabled, 10 minutes
+
+Transcript corrections:
+木溪 => 沐曦
 ```
 
 For AI summaries, configure either:
@@ -195,6 +201,8 @@ For AI summaries, configure either:
 8. Click `Stop Meeting`.
 9. Open the generated meeting note under `Meetings/`.
 10. Click `Summarize Meeting`.
+
+If `Save raw audio` is enabled, EchoNote also saves a matching `*.segments.json` file next to the meeting WAV. When speaker finalization times out or fails, open the meeting note and run `EchoNote: Re-finalize Transcript with Speakers` from the Obsidian command palette to retry from the saved artifacts.
 
 ## Recording Meeting Software Audio
 

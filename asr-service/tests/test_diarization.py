@@ -9,6 +9,8 @@ from echonote_asr.diarization import (
     assign_speakers_to_turns,
     iter_pyannote_intervals,
     merge_adjacent_turns,
+    move_pipeline_to_device,
+    resolve_torch_device_name,
 )
 from echonote_asr.schemas import DiarizationStatus, TranscriptTurn
 
@@ -87,6 +89,26 @@ class DiarizationAssignmentTest(unittest.TestCase):
             ],
         )
 
+    def test_auto_device_prefers_mps_when_cuda_is_unavailable(self) -> None:
+        torch = FakeTorch(cuda_available=False, mps_available=True)
+
+        self.assertEqual(resolve_torch_device_name(torch, "auto"), "mps")
+
+    def test_auto_device_prefers_cuda_when_available(self) -> None:
+        torch = FakeTorch(cuda_available=True, mps_available=True)
+
+        self.assertEqual(resolve_torch_device_name(torch, "auto"), "cuda")
+
+    def test_move_pipeline_to_device_falls_back_to_cpu_when_accelerator_fails(self) -> None:
+        pipeline = FakePipeline(fail_devices={"mps"})
+
+        with patch("echonote_asr.diarization.resolve_torch_device_name", return_value="mps"):
+            with patch.dict("sys.modules", {"torch": FakeTorchModule()}):
+                moved = move_pipeline_to_device(pipeline, "auto")
+
+        self.assertIs(moved, pipeline)
+        self.assertEqual(pipeline.devices, ["mps", "cpu"])
+
 
 class FakeDiarizeOutput:
     def __init__(self, annotation: FakeAnnotation) -> None:
@@ -107,6 +129,41 @@ class FakeSegment:
     def __init__(self, start: float, end: float) -> None:
         self.start = start
         self.end = end
+
+
+class FakeTorch:
+    def __init__(self, *, cuda_available: bool, mps_available: bool) -> None:
+        self.cuda = FakeDeviceBackend(cuda_available)
+        self.backends = FakeBackends(mps_available)
+
+
+class FakeBackends:
+    def __init__(self, mps_available: bool) -> None:
+        self.mps = FakeDeviceBackend(mps_available)
+
+
+class FakeDeviceBackend:
+    def __init__(self, available: bool) -> None:
+        self._available = available
+
+    def is_available(self) -> bool:
+        return self._available
+
+
+class FakeTorchModule:
+    def device(self, name: str) -> str:
+        return name
+
+
+class FakePipeline:
+    def __init__(self, *, fail_devices: set[str] | None = None) -> None:
+        self.devices: list[str] = []
+        self.fail_devices = fail_devices or set()
+
+    def to(self, device: str) -> None:
+        self.devices.append(device)
+        if device in self.fail_devices:
+            raise RuntimeError(f"{device} failed")
 
 
 if __name__ == "__main__":

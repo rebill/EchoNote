@@ -10,6 +10,7 @@ from .schemas import DiarizationStatus, TranscriptSpeaker, TranscriptTurn
 from .text_sanitizer import sanitize_transcript_text
 
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+DEFAULT_DIARIZATION_DEVICE = "auto"
 MIN_SPEAKER_OVERLAP_RATIO = 0.35
 MERGE_GAP_MS = 1200
 MAX_MERGED_TURN_MS = 45_000
@@ -33,9 +34,16 @@ class DiarizationResult:
 
 
 class DiarizationState:
-    def __init__(self, *, enabled: bool = True, model_id: str = DEFAULT_DIARIZATION_MODEL) -> None:
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        model_id: str = DEFAULT_DIARIZATION_MODEL,
+        device: str = DEFAULT_DIARIZATION_DEVICE,
+    ) -> None:
         self.enabled = enabled
         self.model_id = model_id
+        self.device = device.strip().lower() or DEFAULT_DIARIZATION_DEVICE
         self._pipeline: Any | None = None
         self._error: str | None = None
 
@@ -84,7 +92,8 @@ class DiarizationState:
 
         from pyannote.audio import Pipeline
 
-        self._pipeline = Pipeline.from_pretrained(self.model_id, token=huggingface_token())
+        pipeline = Pipeline.from_pretrained(self.model_id, token=huggingface_token())
+        self._pipeline = move_pipeline_to_device(pipeline, self.device)
         self._error = None
         return self._pipeline
 
@@ -103,6 +112,40 @@ def huggingface_token() -> str:
         or os.environ.get("PYANNOTE_AUTH_TOKEN")
         or ""
     ).strip()
+
+
+def move_pipeline_to_device(pipeline: Any, device_preference: str = DEFAULT_DIARIZATION_DEVICE) -> Any:
+    to_device = getattr(pipeline, "to", None)
+    if not callable(to_device):
+        return pipeline
+
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    import torch
+
+    device_name = resolve_torch_device_name(torch, device_preference)
+    try:
+        to_device(torch.device(device_name))
+    except Exception:
+        if device_name == "cpu":
+            raise
+        to_device(torch.device("cpu"))
+    return pipeline
+
+
+def resolve_torch_device_name(torch_module: Any, device_preference: str = DEFAULT_DIARIZATION_DEVICE) -> str:
+    preference = (device_preference or DEFAULT_DIARIZATION_DEVICE).strip().lower()
+    if preference in {"cpu", "cuda", "mps"}:
+        return preference
+    if preference != "auto":
+        raise ValueError("ECHONOTE_DIARIZATION_DEVICE must be one of auto, cpu, cuda, or mps")
+    cuda = getattr(torch_module, "cuda", None)
+    if callable(getattr(cuda, "is_available", None)) and cuda.is_available():
+        return "cuda"
+    backends = getattr(torch_module, "backends", None)
+    mps = getattr(backends, "mps", None)
+    if callable(getattr(mps, "is_available", None)) and mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def iter_pyannote_intervals(output: Any) -> Iterable[SpeakerInterval]:

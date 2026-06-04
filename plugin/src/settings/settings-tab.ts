@@ -1,10 +1,14 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type EchoNotePlugin from "../main";
 import {
+  DEFAULT_AUTO_STOP_SILENCE_MINUTES,
   DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS,
   DEFAULT_COMPANION_DISCOVERY_PATH,
+  MAX_AUTO_STOP_SILENCE_MINUTES,
+  MIN_AUTO_STOP_SILENCE_MINUTES,
   type ChunkLengthSeconds,
-  type LlmProviderType
+  type LlmProviderType,
+  normalizeAutoStopSilenceMinutes
 } from "./settings";
 
 export class EchoNoteSettingTab extends PluginSettingTab {
@@ -113,6 +117,20 @@ export class EchoNoteSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("Transcript corrections")
+      .setDesc("One correction per line, using wrong text => correct text.")
+      .addTextArea((text) => {
+        text.inputEl.rows = 6;
+        text
+          .setPlaceholder("木溪 => 沐曦\nOpen AI => OpenAI")
+          .setValue(this.plugin.settings.transcriptCorrectionRules)
+          .onChange(async (value) => {
+            this.plugin.settings.transcriptCorrectionRules = value;
+            await this.plugin.saveSettings();
+          });
+      });
   }
 
   private renderAudioSettings(containerEl: HTMLElement): void {
@@ -150,6 +168,33 @@ export class EchoNoteSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Selected audio input")
       .setDesc(this.plugin.settings.audioInputDeviceLabel || "Default audio input");
+
+    new Setting(containerEl)
+      .setName("Auto-stop on silence")
+      .setDesc("Automatically stop the meeting when EchoNote records a long silent period.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autoStopOnSilence).onChange(async (value) => {
+          this.plugin.settings.autoStopOnSilence = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Auto-stop silence duration")
+      .setDesc("Minutes of continuous silence before EchoNote stops recording.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = String(MIN_AUTO_STOP_SILENCE_MINUTES);
+        text.inputEl.max = String(MAX_AUTO_STOP_SILENCE_MINUTES);
+        text.inputEl.step = "1";
+        text
+          .setPlaceholder(String(DEFAULT_AUTO_STOP_SILENCE_MINUTES))
+          .setValue(String(this.plugin.settings.autoStopSilenceMinutes))
+          .onChange(async (value) => {
+            this.plugin.settings.autoStopSilenceMinutes = normalizeAutoStopSilenceMinutes(value);
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName("Save raw audio")

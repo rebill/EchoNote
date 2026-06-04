@@ -75,7 +75,12 @@ export class EchoNoteStatusView extends ItemView {
     const summary: StatusSummaryItem[] = [
       { label: "Service", value: status.asrService, tone: this.statusTone(status.asrService) },
       { label: "Model", value: status.model, tone: this.statusTone(status.model) },
-      { label: "Recording", value: status.recording, tone: this.statusTone(status.recording) }
+      { label: "Recording", value: status.recording, tone: this.statusTone(status.recording) },
+      {
+        label: "Speakers",
+        value: status.speakerFinalization,
+        tone: this.statusTone(status.speakerFinalization)
+      }
     ];
     const summaryEl = container.createDiv({ cls: "echonote-status-summary" });
     for (const item of summary) {
@@ -110,6 +115,18 @@ export class EchoNoteStatusView extends ItemView {
           { label: "Current Meeting", value: status.currentMeetingTitle ?? "None" },
           { label: "Chunk Queue", value: `${status.pendingChunkCount} pending` },
           { label: "Last Transcript", value: this.formatLastTranscript(status.lastTranscriptAt) }
+        ]
+      },
+      {
+        title: "Post Processing",
+        rows: [
+          {
+            label: "Speaker Finalization",
+            value: status.speakerFinalization,
+            tone: this.statusTone(status.speakerFinalization),
+            variant: "badge"
+          },
+          { label: "Detail", value: status.speakerFinalizationMessage ?? "None" }
         ]
       }
     ];
@@ -166,6 +183,9 @@ export class EchoNoteStatusView extends ItemView {
       active: isRecording || isPaused || isStopping
     });
     this.addPanelAction(recordingActions, "Summarize", "sparkles", () => this.plugin.summarizeCurrentMeeting());
+    this.addPanelAction(recordingActions, "Re-finalize", "users-round", () => this.plugin.refinalizeCurrentMeeting(), {
+      disabled: status.speakerFinalization === "running"
+    });
   }
 
   private addStatusPill(parent: HTMLElement, value: string): void {
@@ -226,10 +246,10 @@ export class EchoNoteStatusView extends ItemView {
   }
 
   private statusTone(value: string): string {
-    if (["available", "granted", "ready", "recording", "running"].includes(value)) {
+    if (["available", "granted", "ready", "recording", "running", "succeeded"].includes(value)) {
       return "is-success";
     }
-    if (["denied", "error", "invalid", "missing", "stale", "unavailable"].includes(value)) {
+    if (["denied", "error", "failed", "invalid", "missing", "stale", "unavailable"].includes(value)) {
       return "is-danger";
     }
     if (["loading", "starting", "stopping", "paused", "not_running"].includes(value)) {

@@ -4,6 +4,26 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.5.0] - 2026-06-03
+
+### Added
+
+- Added user-maintained transcript correction rules in the Obsidian plugin settings.
+- Added configurable automatic meeting stop after a long silent period, enabled by default at 10 minutes.
+- Added saved transcript segment artifacts next to saved raw meeting audio.
+- Added an Obsidian command to re-finalize the current meeting transcript with speaker labels from saved audio.
+
+### Changed
+
+- Live and finalized transcript text now applies configured ASR correction rules before writing meeting notes.
+- Speaker finalization can now be retried after a pyannote timeout or failure when raw audio saving was enabled.
+- Companion v0.5.0 remains source-only; no unsigned macOS app artifact is included as a release asset.
+- Version metadata is aligned for the v0.5.0 plugin, ASR service, Companion, and Obsidian version map.
+
+### Fixed
+
+- Fixed stale Companion discovery after the desktop app stayed open without UI refreshes by adding a backend discovery heartbeat.
+
 ## [0.4.0] - 2026-06-01
 
 ### Added
@@ -66,6 +86,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.5.0]: https://github.com/rebill/EchoNote/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rebill/EchoNote/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rebill/EchoNote/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rebill/EchoNote/compare/v0.1.0...v0.2.0
