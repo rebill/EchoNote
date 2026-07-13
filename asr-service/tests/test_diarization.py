@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import os
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from echonote_asr.diarization import (
+    DEFAULT_ACCELERATOR_SEGMENTATION_STEP,
+    DEFAULT_CPU_SEGMENTATION_STEP,
     DiarizationState,
+    NATIVE_THREAD_ENVIRONMENT_VARIABLES,
     SpeakerInterval,
     assign_speakers_to_turns,
+    configure_native_thread_environment,
+    configure_pipeline_segmentation_step,
+    configure_torch_cpu_threads,
+    diarization_state_from_environment,
     iter_pyannote_intervals,
     merge_adjacent_turns,
     move_pipeline_to_device,
+    resolve_segmentation_step,
     resolve_torch_device_name,
 )
 from echonote_asr.schemas import DiarizationStatus, TranscriptTurn
@@ -109,6 +121,77 @@ class DiarizationAssignmentTest(unittest.TestCase):
         self.assertIs(moved, pipeline)
         self.assertEqual(pipeline.devices, ["mps", "cpu"])
 
+    def test_environment_configures_device_thread_budget_and_segmentation_step(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ECHONOTE_DIARIZATION_DEVICE": "cpu",
+                "ECHONOTE_DIARIZATION_CPU_THREADS": "1",
+                "ECHONOTE_DIARIZATION_SEGMENTATION_STEP": "0.25",
+            },
+            clear=False,
+        ):
+            state = diarization_state_from_environment()
+
+        self.assertEqual(state.device, "cpu")
+        self.assertEqual(state.cpu_threads, 1)
+        self.assertEqual(state.segmentation_step, 0.25)
+
+    def test_invalid_environment_performance_values_fall_back_safely(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ECHONOTE_DIARIZATION_CPU_THREADS": "0",
+                "ECHONOTE_DIARIZATION_SEGMENTATION_STEP": "not-a-number",
+            },
+            clear=False,
+        ):
+            state = diarization_state_from_environment()
+
+        self.assertGreaterEqual(state.cpu_threads, 1)
+        self.assertIsNone(state.segmentation_step)
+
+    def test_cpu_uses_balanced_segmentation_step_by_default(self) -> None:
+        self.assertEqual(resolve_segmentation_step(None, "cpu"), DEFAULT_CPU_SEGMENTATION_STEP)
+        self.assertEqual(resolve_segmentation_step(None, "mps"), DEFAULT_ACCELERATOR_SEGMENTATION_STEP)
+
+    def test_configures_pipeline_segmentation_stride(self) -> None:
+        pipeline = FakePerformancePipeline(duration=10.0)
+
+        configured = configure_pipeline_segmentation_step(pipeline, 0.2)
+
+        self.assertTrue(configured)
+        self.assertEqual(pipeline.segmentation_step, 0.2)
+        self.assertEqual(pipeline._segmentation.step, 2.0)
+
+    def test_configures_torch_cpu_thread_budget(self) -> None:
+        torch = FakeTorchModule()
+
+        configured = configure_torch_cpu_threads(torch, 2)
+
+        self.assertTrue(configured)
+        self.assertEqual(torch.num_threads, 2)
+
+    def test_configures_native_thread_budget(self) -> None:
+        with patch.dict(os.environ, {"OMP_NUM_THREADS": "8"}, clear=False):
+            configure_native_thread_environment(2)
+
+            self.assertTrue(
+                all(os.environ[name] == "2" for name in NATIVE_THREAD_ENVIRONMENT_VARIABLES)
+            )
+
+    def test_serializes_concurrent_diarization_calls(self) -> None:
+        state = DiarizationState(device="cpu")
+        pipeline = ConcurrentTrackingPipeline()
+        state._pipeline = pipeline
+
+        with patch.object(state, "_availability_error", return_value=None):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(state.diarize_wav, ["first.wav", "second.wav"]))
+
+        self.assertEqual([result.status for result in results], [DiarizationStatus.AVAILABLE] * 2)
+        self.assertEqual(pipeline.max_active_calls, 1)
+
 
 class FakeDiarizeOutput:
     def __init__(self, annotation: FakeAnnotation) -> None:
@@ -151,8 +234,14 @@ class FakeDeviceBackend:
 
 
 class FakeTorchModule:
+    def __init__(self) -> None:
+        self.num_threads: int | None = None
+
     def device(self, name: str) -> str:
         return name
+
+    def set_num_threads(self, value: int) -> None:
+        self.num_threads = value
 
 
 class FakePipeline:
@@ -164,6 +253,35 @@ class FakePipeline:
         self.devices.append(device)
         if device in self.fail_devices:
             raise RuntimeError(f"{device} failed")
+
+
+class FakeSegmentationInference:
+    def __init__(self, duration: float) -> None:
+        self.duration = duration
+        self.step = duration * 0.1
+
+
+class FakePerformancePipeline:
+    def __init__(self, *, duration: float) -> None:
+        self.segmentation_step = 0.1
+        self._segmentation = FakeSegmentationInference(duration)
+
+
+class ConcurrentTrackingPipeline:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.active_calls = 0
+        self.max_active_calls = 0
+
+    def __call__(self, wav_path: str) -> FakeAnnotation:
+        del wav_path
+        with self._lock:
+            self.active_calls += 1
+            self.max_active_calls = max(self.max_active_calls, self.active_calls)
+        time.sleep(0.02)
+        with self._lock:
+            self.active_calls -= 1
+        return FakeAnnotation([])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,12 @@ export type SummaryRequest = {
   prompt: string;
 };
 
+export type LlmTextRequest = {
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+};
+
 export type LlmProviderConfig = {
   apiKey: string;
   baseUrl?: string;
@@ -23,4 +29,5 @@ export type LlmProviderConfig = {
 export interface LlmProvider {
   id: "openai-compatible" | "anthropic";
   generateSummary(request: SummaryRequest): Promise<MeetingSummary>;
+  generateText(request: LlmTextRequest): Promise<string>;
 }

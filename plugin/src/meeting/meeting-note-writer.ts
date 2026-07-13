@@ -1,12 +1,13 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type { TranscriptSegment, TranscriptTurn } from "../asr/asr-types";
 import type { EchoNoteSettings } from "../settings/settings";
-import { formatClockTime, formatMeetingTitle, formatTranscriptTimestamp, sanitizeFileName } from "../utils/time";
+import { formatClockTime, formatMeetingTitle, formatTranscriptTimestamp, pad2, sanitizeFileName } from "../utils/time";
 import type { MeetingSummary } from "../llm/llm-types";
 import { extractTranscript, replaceMeetingEndTime, replaceSummarySections, replaceTranscriptSection } from "./markdown-sections";
 import { renderMeetingTemplate } from "./meeting-template";
 import { applyTranscriptCorrections } from "./transcript-corrections";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
+import { formatTranscriptTurns, parseTranscriptMarkdown, type ParsedTranscript } from "./transcript-markdown";
 import {
   getMeetingArtifactBaseName,
   getMeetingAudioFolder,
@@ -130,6 +131,37 @@ export class MeetingNoteWriter {
     return extractTranscript(content);
   }
 
+  async readParsedTranscript(file: TFile): Promise<ParsedTranscript> {
+    return parseTranscriptMarkdown(await this.readTranscript(file));
+  }
+
+  async saveTranscriptBeforeLlmArtifact(file: TFile, transcript: string, now = new Date()): Promise<string> {
+    const artifactFolder = getTranscriptCorrectionArtifactFolder(file.path);
+    await this.ensureFolder(artifactFolder);
+    const fileName = `${sanitizeFileName(file.basename) || "meeting"}.transcript.before-llm.${formatArtifactTimestamp(now)}.md`;
+    const path = await this.nextAvailableAdapterPath(artifactFolder, fileName);
+    await this.app.vault.adapter.write(path, `${transcript.trim()}\n`);
+    return path;
+  }
+
+  async writeTranscriptCorrectionMetadata(
+    file: TFile,
+    correctedAt = new Date(),
+    changedTurns = 0,
+    totalTurns = 0
+  ): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const updated = upsertTranscriptCorrectionMetadata(
+      content,
+      formatMetadataTimestamp(correctedAt),
+      changedTurns,
+      totalTurns
+    );
+    if (updated !== content) {
+      await this.app.vault.modify(file, updated);
+    }
+  }
+
   async writeSummary(file: TFile, summary: MeetingSummary): Promise<void> {
     const content = await this.app.vault.read(file);
     const updated = replaceSummarySections(content, {
@@ -143,18 +175,51 @@ export class MeetingNoteWriter {
   }
 
   private async ensureFolder(path: string): Promise<void> {
-    if (!path || this.app.vault.getAbstractFileByPath(path)) {
+    const normalizedPath = normalizePath(path);
+    if (!normalizedPath || await this.vaultPathExists(normalizedPath)) {
       return;
     }
 
-    const parts = path.split("/");
+    const parts = normalizedPath.split("/");
     let current = "";
     for (const part of parts) {
       current = current ? `${current}/${part}` : part;
-      if (!this.app.vault.getAbstractFileByPath(current)) {
-        await this.app.vault.createFolder(current);
+      if (!await this.vaultPathExists(current)) {
+        await this.createFolderIfMissing(current);
       }
     }
+  }
+
+  private async createFolderIfMissing(path: string): Promise<void> {
+    try {
+      await this.app.vault.createFolder(path);
+    } catch (error) {
+      if (!isAlreadyExistsError(error) && !await this.vaultPathExists(path)) {
+        throw error;
+      }
+    }
+  }
+
+  private async vaultPathExists(path: string): Promise<boolean> {
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      return true;
+    }
+
+    return this.app.vault.adapter.exists(path);
+  }
+
+  private async nextAvailableAdapterPath(folder: string, fileName: string): Promise<string> {
+    const baseName = fileName.replace(/\.md$|\.wav$/i, "");
+    const extension = fileName.endsWith(".wav") ? ".wav" : ".md";
+    let candidate = normalizePath(`${folder}/${fileName}`);
+    let index = 2;
+
+    while (await this.app.vault.adapter.exists(candidate)) {
+      candidate = normalizePath(`${folder}/${baseName} ${index}${extension}`);
+      index += 1;
+    }
+
+    return candidate;
   }
 
   private async createOrOverwriteText(path: string, content: string): Promise<void> {
@@ -193,6 +258,11 @@ export class MeetingNoteWriter {
   }
 }
 
+function isAlreadyExistsError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already exists/i.test(message);
+}
+
 function formatBullets(items: string[]): string {
   const normalized = items.map((item) => item.trim()).filter(Boolean);
   if (normalized.length === 0) {
@@ -209,18 +279,49 @@ function formatTasks(items: string[]): string {
   return normalized.map((item) => `- [ ] ${item}`).join("\n");
 }
 
-function formatTranscriptTurns(turns: TranscriptTurn[], enableTimestamps: boolean, correctionRules: string): string {
-  return turns
-    .map((turn) => {
-      const text = applyTranscriptCorrections(sanitizeTranscriptText(turn.text), correctionRules);
-      if (!text) {
-        return "";
-      }
+function getTranscriptCorrectionArtifactFolder(filePath: string): string {
+  const folder = normalizePath(filePath).split("/").slice(0, -1).join("/");
+  return normalizePath(folder ? `${folder}/.echonote-artifacts` : ".echonote-artifacts");
+}
 
-      const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(turn.started_at_ms)}] ` : "";
-      const speaker = turn.speaker ? `${turn.speaker}: ` : "";
-      return `${timestamp}${speaker}${text}`;
-    })
-    .filter(Boolean)
-    .join("\n");
+function upsertTranscriptCorrectionMetadata(
+  markdown: string,
+  correctedAt: string,
+  changedTurns: number,
+  totalTurns: number
+): string {
+  const line = `- Transcript Correction: LLM checked at ${correctedAt}; changed ${changedTurns} of ${totalTurns} turn(s)`;
+  const existing = /^-[ \t]*Transcript Correction:[^\n]*$/m;
+  if (existing.test(markdown)) {
+    return markdown.replace(existing, line);
+  }
+
+  const firstSectionIndex = markdown.search(/^##\s+/m);
+  if (firstSectionIndex < 0) {
+    return `${markdown.trimEnd()}\n${line}\n`;
+  }
+
+  const beforeSections = markdown.slice(0, firstSectionIndex).trimEnd();
+  const sections = markdown.slice(firstSectionIndex).trimStart();
+  if (!beforeSections) {
+    return `${line}\n\n${sections}`;
+  }
+
+  return `${beforeSections}\n${line}\n\n${sections}`;
+}
+
+function formatArtifactTimestamp(date: Date): string {
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+    "-",
+    pad2(date.getHours()),
+    pad2(date.getMinutes()),
+    pad2(date.getSeconds())
+  ].join("");
+}
+
+function formatMetadataTimestamp(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }

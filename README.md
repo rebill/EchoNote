@@ -6,10 +6,11 @@ MVP scope:
 
 - macOS only.
 - Local ASR with MLX.
-- Optional macOS EchoNote desktop app to start, stop, monitor, and diagnose the local ASR service.
+- macOS EchoNote desktop app to start, stop, monitor, and diagnose the local ASR service.
 - Quasi-real-time chunk transcription.
 - Silence-aware live chunking to reduce sentence cuts.
 - Optional local anonymous speaker labels in final transcripts.
+- Optional conservative LLM transcript correction with before-correction artifacts.
 - Markdown meeting notes in your Obsidian vault.
 - OpenAI-compatible and Anthropic summary providers.
 - Optional virtual audio input support through BlackHole or Loopback.

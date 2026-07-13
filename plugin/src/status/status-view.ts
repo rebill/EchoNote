@@ -80,6 +80,11 @@ export class EchoNoteStatusView extends ItemView {
         label: "Speakers",
         value: status.speakerFinalization,
         tone: this.statusTone(status.speakerFinalization)
+      },
+      {
+        label: "Correction",
+        value: status.transcriptCorrection,
+        tone: this.statusTone(status.transcriptCorrection)
       }
     ];
     const summaryEl = container.createDiv({ cls: "echonote-status-summary" });
@@ -126,7 +131,14 @@ export class EchoNoteStatusView extends ItemView {
             tone: this.statusTone(status.speakerFinalization),
             variant: "badge"
           },
-          { label: "Detail", value: status.speakerFinalizationMessage ?? "None" }
+          { label: "Speaker Detail", value: status.speakerFinalizationMessage ?? "None" },
+          {
+            label: "Transcript Correction",
+            value: status.transcriptCorrection,
+            tone: this.statusTone(status.transcriptCorrection),
+            variant: "badge"
+          },
+          { label: "Correction Detail", value: status.transcriptCorrectionMessage ?? "None" }
         ]
       }
     ];
@@ -183,6 +195,9 @@ export class EchoNoteStatusView extends ItemView {
       active: isRecording || isPaused || isStopping
     });
     this.addPanelAction(recordingActions, "Summarize", "sparkles", () => this.plugin.summarizeCurrentMeeting());
+    this.addPanelAction(recordingActions, "Correct", "spell-check", () => this.plugin.correctCurrentTranscript(), {
+      disabled: status.transcriptCorrection === "running"
+    });
     this.addPanelAction(recordingActions, "Re-finalize", "users-round", () => this.plugin.refinalizeCurrentMeeting(), {
       disabled: status.speakerFinalization === "running"
     });

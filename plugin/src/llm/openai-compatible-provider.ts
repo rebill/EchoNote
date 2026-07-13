@@ -1,4 +1,5 @@
-import type { LlmProvider, LlmProviderConfig, MeetingSummary, SummaryRequest } from "./llm-types";
+import type { RequestUrlParam, RequestUrlResponse } from "obsidian";
+import type { LlmProvider, LlmProviderConfig, LlmTextRequest, MeetingSummary, SummaryRequest } from "./llm-types";
 import { buildSummarySystemPrompt, buildSummaryUserPrompt, parseMeetingSummary } from "./summary-json";
 
 type OpenAiChatResponse = {
@@ -15,24 +16,36 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   constructor(private readonly config: LlmProviderConfig) {}
 
   async generateSummary(request: SummaryRequest): Promise<MeetingSummary> {
-    const response = await fetch(`${stripTrailingSlash(this.config.baseUrl ?? "")}/chat/completions`, {
+    const content = await this.generateText({
+      systemPrompt: buildSummarySystemPrompt(request.language),
+      userPrompt: buildSummaryUserPrompt(request.transcript, request.prompt),
+      temperature: 0.2
+    });
+
+    return parseMeetingSummary(content);
+  }
+
+  async generateText(request: LlmTextRequest): Promise<string> {
+    const response = await requestObsidianUrl({
+      url: `${stripTrailingSlash(this.config.baseUrl ?? "")}/chat/completions`,
       method: "POST",
+      contentType: "application/json",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${this.config.apiKey}`
       },
       body: JSON.stringify({
         model: this.config.model,
         messages: [
-          { role: "system", content: buildSummarySystemPrompt(request.language) },
-          { role: "user", content: buildSummaryUserPrompt(request.transcript, request.prompt) }
+          { role: "system", content: request.systemPrompt },
+          { role: "user", content: request.userPrompt }
         ],
-        temperature: 0.2
-      })
+        temperature: request.temperature ?? 0.2
+      }),
+      throw: false
     });
 
-    const body = await response.text();
-    if (!response.ok) {
+    const body = response.text;
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(body || `OpenAI-compatible request failed with ${response.status}`);
     }
 
@@ -42,10 +55,15 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       throw new Error("OpenAI-compatible response did not contain message content.");
     }
 
-    return parseMeetingSummary(content);
+    return content;
   }
 }
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+async function requestObsidianUrl(request: RequestUrlParam): Promise<RequestUrlResponse> {
+  const { requestUrl } = require("obsidian") as typeof import("obsidian");
+  return requestUrl(request);
 }

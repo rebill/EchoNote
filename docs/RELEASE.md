@@ -27,6 +27,7 @@ Run plugin checks:
 ```bash
 cd plugin
 npm run typecheck
+npm test
 npm run build
 npm run package
 ```
@@ -36,6 +37,12 @@ Run ASR service tests:
 ```bash
 cd asr-service
 .venv/bin/python -m unittest discover -s tests
+```
+
+When the Hugging Face token and cached community-1 model are available, also run the real diarization smoke test from the repository root:
+
+```bash
+asr-service/.venv/bin/python scripts/v0_4_0_real_diarization_smoke.py
 ```
 
 For Companion releases, run Companion checks from `companion/`:

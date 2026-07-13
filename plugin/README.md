@@ -55,6 +55,14 @@ Open AI => OpenAI
 
 Rules apply to both live transcript chunks and the finalized transcript before meeting notes are written.
 
+## LLM Transcript Correction
+
+LLM transcript correction is experimental and disabled by default. When enabled, EchoNote sends the final transcript to the configured LLM provider after speaker finalization, applies conservative typo checks, then updates `## Transcript` only when text actually changes.
+
+The correction keeps timestamps, speaker labels, and turn order intact. Before overwriting the transcript, EchoNote saves the previous transcript under `.echonote-artifacts/` next to the meeting note.
+
+You can also run `EchoNote: Correct Transcript with LLM` on the current meeting note. This manual command works even if automatic LLM correction is disabled. For recurring names, projects, and technical terms, the deterministic `wrong => correct` rules are usually more reliable than LLM correction.
+
 ## Speaker Transcript Retry
 
 When `Save raw audio` is enabled, EchoNote saves both the meeting WAV and a matching `*.segments.json` file in the configured audio folder.

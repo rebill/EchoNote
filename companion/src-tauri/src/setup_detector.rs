@@ -12,6 +12,7 @@ use std::process::Command;
 
 const MIN_PYTHON_MAJOR: u32 = 3;
 const MIN_PYTHON_MINOR: u32 = 11;
+pub(crate) const DIARIZATION_DEPENDENCY_PROBE: &str = "import importlib.metadata as m; version = m.version('pyannote.audio'); raise SystemExit(0 if int(version.split('.', 1)[0]) == 4 else 1)";
 
 pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetection {
     let system = detect_system_step();
@@ -29,12 +30,11 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
         asr_service_path.as_deref(),
         settings.backend,
     );
-    let diarization_dependency_ready =
-        probe_python_import(
-            python_path.as_deref(),
-            asr_service_path.as_deref(),
-            "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyannote.audio') else 1)",
-        );
+    let diarization_dependency_ready = probe_python_import(
+        python_path.as_deref(),
+        asr_service_path.as_deref(),
+        DIARIZATION_DEPENDENCY_PROBE,
+    );
     let dependencies_step = dependencies_step(
         dependencies_ready,
         python_path.as_deref(),
@@ -332,7 +332,11 @@ fn dependencies_step(
     )
 }
 
-fn probe_python_import(python_path: Option<&str>, service_dir: Option<&Path>, script: &str) -> bool {
+fn probe_python_import(
+    python_path: Option<&str>,
+    service_dir: Option<&Path>,
+    script: &str,
+) -> bool {
     let (Some(python_path), Some(service_dir)) = (python_path, service_dir) else {
         return false;
     };
