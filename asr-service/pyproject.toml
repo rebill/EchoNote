@@ -14,7 +14,9 @@ dependencies = [
 echonote-asr = "echonote_asr.__main__:main"
 
 [project.optional-dependencies]
-dev = []
+dev = [
+  "httpx2>=2.0.0,<3.0.0"
+]
 mlx = [
   "mlx-audio>=0.1.0"
 ]
