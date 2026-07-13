@@ -3,10 +3,11 @@ import { AudioRecorder } from "./audio/audio-recorder";
 import { AsrRuntimeResolutionError, resolveAsrRuntime } from "./asr/asr-runtime-resolver";
 import { AsrServiceClient } from "./asr/asr-service-client";
 import { resolveCompanionDiscovery } from "./asr/companion-discovery";
-import type { FinalizeTranscriptResponse } from "./asr/asr-types";
+import type { FinalizeTranscriptResponse, TranscriptTurn } from "./asr/asr-types";
 import { MeetingNoteWriter } from "./meeting/meeting-note-writer";
 import { MeetingSessionController } from "./meeting/meeting-session";
 import { SummaryService } from "./llm/summary-service";
+import { TranscriptCorrectionService } from "./llm/transcript-correction-service";
 import { EchoNoteSettingTab } from "./settings/settings-tab";
 import { DEFAULT_SETTINGS, normalizeAutoStopSilenceMinutes, type EchoNoteSettings } from "./settings/settings";
 import {
@@ -40,6 +41,7 @@ export default class EchoNotePlugin extends Plugin {
   private noteWriter: MeetingNoteWriter | null = null;
   private meetingSession: MeetingSessionController | null = null;
   private summaryService = new SummaryService();
+  private transcriptCorrectionService = new TranscriptCorrectionService();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -53,7 +55,9 @@ export default class EchoNotePlugin extends Plugin {
       getSettings: () => this.settings,
       statusStore: this.statusStore,
       audioRecorder: this.audioRecorder,
-      noteWriter: this.noteWriter
+      noteWriter: this.noteWriter,
+      correctFinalTranscript: (file, turns, enableTimestamps) =>
+        this.correctTranscriptTurns(file, turns, enableTimestamps, "automatic")
     });
 
     this.registerView(ECHONOTE_STATUS_VIEW_TYPE, (leaf) => new EchoNoteStatusView(leaf, this));
@@ -96,6 +100,9 @@ export default class EchoNotePlugin extends Plugin {
 
     if (typeof settings.transcriptCorrectionRules !== "string") {
       settings.transcriptCorrectionRules = DEFAULT_SETTINGS.transcriptCorrectionRules;
+    }
+    if (typeof settings.enableLlmTranscriptCorrection !== "boolean") {
+      settings.enableLlmTranscriptCorrection = DEFAULT_SETTINGS.enableLlmTranscriptCorrection;
     }
     if (typeof settings.autoStopOnSilence !== "boolean") {
       settings.autoStopOnSilence = DEFAULT_SETTINGS.autoStopOnSilence;
@@ -165,6 +172,11 @@ export default class EchoNotePlugin extends Plugin {
     void this.refinalizeMeetingWithSpeakers();
   }
 
+  correctCurrentTranscript(): void {
+    void this.openStatusView();
+    void this.correctCurrentTranscriptWithLlm();
+  }
+
   refreshCompanionStatus(): void {
     void this.refreshCompanionStatusInternal();
   }
@@ -204,6 +216,12 @@ export default class EchoNotePlugin extends Plugin {
       id: "echonote-refinalize-speaker-transcript",
       name: "Re-finalize Transcript with Speakers",
       callback: () => this.refinalizeCurrentMeeting()
+    });
+
+    this.addCommand({
+      id: "echonote-correct-transcript-with-llm",
+      name: "Correct Transcript with LLM",
+      callback: () => this.correctCurrentTranscript()
     });
 
     this.addCommand({
@@ -351,6 +369,9 @@ export default class EchoNotePlugin extends Plugin {
       );
       this.setSpeakerFinalizationStatus("succeeded", this.createSpeakerFinalizationResultMessage(finalized));
       this.notifySpeakerFinalizationResult(finalized, "EchoNote re-finalized transcript");
+      if (this.settings.enableLlmTranscriptCorrection) {
+        void this.correctTranscriptTurns(file, finalized.turns, this.settings.enableTimestamps, "automatic");
+      }
     } catch (error) {
       this.statusStore.setState({
         ...this.createRefinalizeFailureStatus(error),
@@ -358,6 +379,94 @@ export default class EchoNotePlugin extends Plugin {
         speakerFinalizationMessage: `Speaker re-finalization failed: ${error instanceof Error ? error.message : String(error)}`
       });
       new Notice(`EchoNote speaker re-finalization failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async correctCurrentTranscriptWithLlm(): Promise<void> {
+    if (!this.noteWriter) {
+      return;
+    }
+
+    const file = this.resolveMeetingTargetFile();
+    if (!file) {
+      new Notice("EchoNote could not find a meeting note to correct.");
+      return;
+    }
+
+    try {
+      const parsedTranscript = await this.noteWriter.readParsedTranscript(file);
+      if (parsedTranscript.turns.length === 0) {
+        new Notice("EchoNote transcript is empty.");
+        return;
+      }
+      await this.correctTranscriptTurns(file, parsedTranscript.turns, parsedTranscript.hasTimestamps, "manual");
+    } catch (error) {
+      this.handleTranscriptCorrectionFailure(error, "Failed to correct transcript with LLM.");
+    }
+  }
+
+  private async correctTranscriptTurns(
+    file: TFile,
+    turns: TranscriptTurn[],
+    enableTimestamps: boolean,
+    mode: "automatic" | "manual"
+  ): Promise<void> {
+    if (!this.noteWriter) {
+      return;
+    }
+
+    if (mode === "automatic" && !this.settings.enableLlmTranscriptCorrection) {
+      return;
+    }
+
+    try {
+      this.statusStore.setState({
+        transcriptCorrection: "running",
+        transcriptCorrectionMessage: "Saving transcript before LLM correction.",
+        lastError: null
+      });
+      const originalTranscript = await this.noteWriter.readTranscript(file);
+      const artifactPath = await this.noteWriter.saveTranscriptBeforeLlmArtifact(file, originalTranscript);
+      this.statusStore.setState({
+        transcriptCorrectionMessage: "Running conservative LLM transcript correction."
+      });
+      const result = await this.transcriptCorrectionService.correctTurns(turns, this.settings);
+      if (result.turns.length === 0) {
+        throw new Error("LLM transcript correction returned no transcript.");
+      }
+      if (result.acceptedTurns === 0 && result.failedBatches > 0) {
+        throw new Error("LLM transcript correction failed for every batch.");
+      }
+
+      if (result.changedTurns > 0) {
+        await this.noteWriter.replaceTranscript(
+          file,
+          result.turns,
+          enableTimestamps,
+          this.settings.transcriptCorrectionRules
+        );
+      }
+      await this.noteWriter.writeTranscriptCorrectionMetadata(file, new Date(), result.changedTurns, result.turns.length);
+      const partialMessage =
+        result.rejectedTurns > 0
+          ? ` ${result.rejectedTurns} unsafe turn(s) were kept from the ASR transcript.`
+          : "";
+      const correctionMessage =
+        result.changedTurns > 0
+          ? `LLM transcript correction changed ${result.changedTurns} of ${result.turns.length} turn(s).`
+          : `LLM transcript correction checked ${result.turns.length} turn(s); no changes were needed.`;
+      this.statusStore.setState({
+        transcriptCorrection: "succeeded",
+        transcriptCorrectionMessage: `${correctionMessage} Before artifact: ${artifactPath}.${partialMessage}`
+      });
+      new Notice(correctionMessage);
+    } catch (error) {
+      this.handleTranscriptCorrectionFailure(
+        error,
+        mode === "automatic"
+          ? "LLM transcript correction failed. Final ASR transcript was kept."
+          : "LLM transcript correction failed. Current transcript was kept."
+      );
     }
   }
 
@@ -464,6 +573,19 @@ export default class EchoNotePlugin extends Plugin {
     });
   }
 
+  private handleTranscriptCorrectionFailure(error: unknown, message: string): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    this.statusStore.setState({
+      transcriptCorrection: "failed",
+      transcriptCorrectionMessage: `${message} ${detail}`,
+      lastError: createEchoNoteError(isLlmConfigError(error) ? "LLM_CONFIG_MISSING" : "LLM_REQUEST_FAILED", message, {
+        detail,
+        recoverable: true
+      })
+    });
+    new Notice(`${message} ${detail}`);
+  }
+
   private createRefinalizeFailureStatus(error: unknown): Partial<ReturnType<StatusStore["getState"]>> {
     if (error instanceof AsrRuntimeResolutionError) {
       return {
@@ -483,6 +605,11 @@ export default class EchoNotePlugin extends Plugin {
       })
     };
   }
+}
+
+function isLlmConfigError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /api key|base url|model/i.test(message);
 }
 
 export type { EchoNoteSettings };

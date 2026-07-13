@@ -21,6 +21,7 @@ export type EchoNoteSettings = {
   companionDiscoveryMaxAgeSeconds: number;
   chunkLengthSeconds: ChunkLengthSeconds;
   transcriptCorrectionRules: string;
+  enableLlmTranscriptCorrection: boolean;
 
   audioInputDeviceId: string;
   audioInputDeviceLabel: string;
@@ -84,6 +85,7 @@ export const DEFAULT_SETTINGS: EchoNoteSettings = {
   companionDiscoveryMaxAgeSeconds: DEFAULT_COMPANION_DISCOVERY_MAX_AGE_SECONDS,
   chunkLengthSeconds: 15,
   transcriptCorrectionRules: "",
+  enableLlmTranscriptCorrection: false,
 
   audioInputDeviceId: "default",
   audioInputDeviceLabel: "Default audio input",

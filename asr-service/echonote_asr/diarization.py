@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-import os
 import importlib.util
+import logging
+import os
+import threading
+import time
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -9,8 +13,22 @@ from typing import Any, Iterable
 from .schemas import DiarizationStatus, TranscriptSpeaker, TranscriptTurn
 from .text_sanitizer import sanitize_transcript_text
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEFAULT_DIARIZATION_DEVICE = "auto"
+DEFAULT_DIARIZATION_CPU_THREADS = max(1, min(2, os.cpu_count() or 1))
+DEFAULT_CPU_SEGMENTATION_STEP = 0.2
+DEFAULT_ACCELERATOR_SEGMENTATION_STEP = 0.1
+MIN_SEGMENTATION_STEP = 0.05
+MAX_SEGMENTATION_STEP = 1.0
+NATIVE_THREAD_ENVIRONMENT_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 MIN_SPEAKER_OVERLAP_RATIO = 0.35
 MERGE_GAP_MS = 1200
 MAX_MERGED_TURN_MS = 45_000
@@ -40,12 +58,19 @@ class DiarizationState:
         enabled: bool = True,
         model_id: str = DEFAULT_DIARIZATION_MODEL,
         device: str = DEFAULT_DIARIZATION_DEVICE,
+        cpu_threads: int = DEFAULT_DIARIZATION_CPU_THREADS,
+        segmentation_step: float | None = None,
     ) -> None:
         self.enabled = enabled
         self.model_id = model_id
         self.device = device.strip().lower() or DEFAULT_DIARIZATION_DEVICE
+        self.cpu_threads = validate_cpu_threads(cpu_threads)
+        self.segmentation_step = validate_segmentation_step(segmentation_step)
+        self.effective_segmentation_step: float | None = None
+        self.resolved_device: str | None = None
         self._pipeline: Any | None = None
         self._error: str | None = None
+        self._inference_lock = threading.RLock()
 
     def status_response(self) -> dict[str, object]:
         if not self.enabled:
@@ -70,13 +95,49 @@ class DiarizationState:
         if availability_error is not None:
             return DiarizationResult(DiarizationStatus.UNAVAILABLE, [], self.model_id, availability_error)
 
+        waiting_started_at = time.perf_counter()
         try:
-            pipeline = self._load_pipeline()
-            output = pipeline(wav_path)
-            intervals = list(iter_pyannote_intervals(output))
+            with self._inference_lock:
+                wait_seconds = time.perf_counter() - waiting_started_at
+                pipeline = self._load_pipeline()
+                inference_started_at = time.perf_counter()
+                logger.info(
+                    "diarization_started",
+                    extra={
+                        "_model_id": self.model_id,
+                        "_device": self.resolved_device or self.device,
+                        "_cpu_threads": self.cpu_threads,
+                        "_segmentation_step": self.effective_segmentation_step,
+                        "_queue_wait_seconds": round(wait_seconds, 3),
+                    },
+                )
+                with limit_native_thread_pools(self.cpu_threads):
+                    output = pipeline(wav_path)
+                intervals = list(iter_pyannote_intervals(output))
+                elapsed_seconds = time.perf_counter() - inference_started_at
+            logger.info(
+                "diarization_completed",
+                extra={
+                    "_model_id": self.model_id,
+                    "_device": self.resolved_device or self.device,
+                    "_cpu_threads": self.cpu_threads,
+                    "_segmentation_step": self.effective_segmentation_step,
+                    "_elapsed_seconds": round(elapsed_seconds, 3),
+                    "_interval_count": len(intervals),
+                },
+            )
             return DiarizationResult(DiarizationStatus.AVAILABLE, intervals, self.model_id)
         except Exception as exc:
             self._error = str(exc)
+            logger.exception(
+                "diarization_failed",
+                extra={
+                    "_model_id": self.model_id,
+                    "_device": self.resolved_device or self.device,
+                    "_cpu_threads": self.cpu_threads,
+                    "_segmentation_step": self.effective_segmentation_step,
+                },
+            )
             return DiarizationResult(DiarizationStatus.FAILED, [], self.model_id, str(exc))
 
     def _availability_error(self) -> str | None:
@@ -87,15 +148,150 @@ class DiarizationState:
         return None
 
     def _load_pipeline(self) -> Any:
-        if self._pipeline is not None:
+        with self._inference_lock:
+            if self._pipeline is not None:
+                return self._pipeline
+
+            configure_native_thread_environment(self.cpu_threads)
+            os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+            from pyannote.audio import Pipeline
+            import torch
+
+            configure_torch_cpu_threads(torch, self.cpu_threads)
+            pipeline = Pipeline.from_pretrained(self.model_id, token=huggingface_token())
+            self._pipeline, self.resolved_device = move_pipeline_to_device_with_name(pipeline, self.device)
+            self.effective_segmentation_step = resolve_segmentation_step(
+                self.segmentation_step,
+                self.resolved_device,
+            )
+            configured = configure_pipeline_segmentation_step(
+                self._pipeline,
+                self.effective_segmentation_step,
+            )
+            if not configured:
+                logger.warning(
+                    "diarization_segmentation_step_unsupported",
+                    extra={
+                        "_model_id": self.model_id,
+                        "_segmentation_step": self.effective_segmentation_step,
+                    },
+                )
+            self._error = None
             return self._pipeline
 
-        from pyannote.audio import Pipeline
 
-        pipeline = Pipeline.from_pretrained(self.model_id, token=huggingface_token())
-        self._pipeline = move_pipeline_to_device(pipeline, self.device)
-        self._error = None
-        return self._pipeline
+def diarization_state_from_environment() -> DiarizationState:
+    return DiarizationState(
+        enabled=os.environ.get("ECHONOTE_DIARIZATION_ENABLED", "1") != "0",
+        model_id=os.environ.get("ECHONOTE_DIARIZATION_MODEL_ID", "").strip() or DEFAULT_DIARIZATION_MODEL,
+        device=os.environ.get("ECHONOTE_DIARIZATION_DEVICE", DEFAULT_DIARIZATION_DEVICE),
+        cpu_threads=read_positive_int_environment(
+            "ECHONOTE_DIARIZATION_CPU_THREADS",
+            DEFAULT_DIARIZATION_CPU_THREADS,
+        ),
+        segmentation_step=read_optional_float_environment(
+            "ECHONOTE_DIARIZATION_SEGMENTATION_STEP",
+            minimum=MIN_SEGMENTATION_STEP,
+            maximum=MAX_SEGMENTATION_STEP,
+        ),
+    )
+
+
+def validate_cpu_threads(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("cpu_threads must be a positive integer")
+    return value
+
+
+def validate_segmentation_step(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("segmentation_step must be a number")
+    normalized = float(value)
+    if not MIN_SEGMENTATION_STEP <= normalized <= MAX_SEGMENTATION_STEP:
+        raise ValueError(
+            f"segmentation_step must be between {MIN_SEGMENTATION_STEP} and {MAX_SEGMENTATION_STEP}"
+        )
+    return normalized
+
+
+def read_positive_int_environment(name: str, default: int) -> int:
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        return validate_cpu_threads(int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning(
+            "invalid_diarization_environment_setting",
+            extra={"_setting": name, "_value": raw_value, "_fallback": default},
+        )
+        return default
+
+
+def read_optional_float_environment(name: str, *, minimum: float, maximum: float) -> float | None:
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return None
+    try:
+        value = float(raw_value)
+    except ValueError:
+        value = float("nan")
+    if minimum <= value <= maximum:
+        return value
+    logger.warning(
+        "invalid_diarization_environment_setting",
+        extra={"_setting": name, "_value": raw_value, "_fallback": "auto"},
+    )
+    return None
+
+
+def configure_native_thread_environment(cpu_threads: int) -> None:
+    value = str(validate_cpu_threads(cpu_threads))
+    for name in NATIVE_THREAD_ENVIRONMENT_VARIABLES:
+        os.environ[name] = value
+
+
+def limit_native_thread_pools(cpu_threads: int) -> AbstractContextManager[Any]:
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        return nullcontext()
+    return threadpool_limits(limits=validate_cpu_threads(cpu_threads))
+
+
+def configure_torch_cpu_threads(torch_module: Any, cpu_threads: int) -> bool:
+    set_num_threads = getattr(torch_module, "set_num_threads", None)
+    if not callable(set_num_threads):
+        return False
+    set_num_threads(validate_cpu_threads(cpu_threads))
+    return True
+
+
+def resolve_segmentation_step(configured_step: float | None, resolved_device: str | None) -> float:
+    if configured_step is not None:
+        return configured_step
+    if resolved_device == "cpu":
+        return DEFAULT_CPU_SEGMENTATION_STEP
+    return DEFAULT_ACCELERATOR_SEGMENTATION_STEP
+
+
+def configure_pipeline_segmentation_step(pipeline: Any, segmentation_step: float) -> bool:
+    normalized_step = validate_segmentation_step(segmentation_step)
+    assert normalized_step is not None
+    segmentation = getattr(pipeline, "_segmentation", None)
+    duration = getattr(segmentation, "duration", None)
+    if segmentation is None or not isinstance(duration, (int, float)) or duration <= 0:
+        return False
+    if not hasattr(segmentation, "step"):
+        return False
+
+    segmentation.step = float(duration) * normalized_step
+    if hasattr(pipeline, "segmentation_step"):
+        pipeline.segmentation_step = normalized_step
+    return True
 
 
 def pyannote_available() -> bool:
@@ -115,9 +311,17 @@ def huggingface_token() -> str:
 
 
 def move_pipeline_to_device(pipeline: Any, device_preference: str = DEFAULT_DIARIZATION_DEVICE) -> Any:
+    moved_pipeline, _ = move_pipeline_to_device_with_name(pipeline, device_preference)
+    return moved_pipeline
+
+
+def move_pipeline_to_device_with_name(
+    pipeline: Any,
+    device_preference: str = DEFAULT_DIARIZATION_DEVICE,
+) -> tuple[Any, str]:
     to_device = getattr(pipeline, "to", None)
     if not callable(to_device):
-        return pipeline
+        return pipeline, "default"
 
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     import torch
@@ -128,8 +332,9 @@ def move_pipeline_to_device(pipeline: Any, device_preference: str = DEFAULT_DIAR
     except Exception:
         if device_name == "cpu":
             raise
-        to_device(torch.device("cpu"))
-    return pipeline
+        device_name = "cpu"
+        to_device(torch.device(device_name))
+    return pipeline, device_name
 
 
 def resolve_torch_device_name(torch_module: Any, device_preference: str = DEFAULT_DIARIZATION_DEVICE) -> str:

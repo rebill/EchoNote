@@ -9,6 +9,7 @@ import {
 import { concatWavFiles } from "../audio/wav-encoder";
 import { AsrRuntimeResolutionError, resolveAsrRuntime } from "../asr/asr-runtime-resolver";
 import { AsrServiceClient } from "../asr/asr-service-client";
+import type { TranscriptTurn } from "../asr/asr-types";
 import type { EchoNoteSettings } from "../settings/settings";
 import { createAsrRuntimeStatus, createCompanionResolutionStatus } from "../status/companion-status";
 import type { StatusStore } from "../status/status-store";
@@ -23,6 +24,7 @@ type MeetingSessionControllerOptions = {
   statusStore: StatusStore;
   audioRecorder: AudioRecorder;
   noteWriter: MeetingNoteWriter;
+  correctFinalTranscript?: (file: TFile, turns: TranscriptTurn[], enableTimestamps: boolean) => Promise<void>;
 };
 
 type LiveTranscriptSegment = Awaited<ReturnType<AsrServiceClient["transcribe"]>>;
@@ -480,6 +482,9 @@ export class MeetingSessionController {
           speakerFinalization: "succeeded",
           speakerFinalizationMessage: `Transcript written. ${finalized.turns.length} turn(s) generated.`
         });
+      }
+      if (this.options.correctFinalTranscript) {
+        void this.options.correctFinalTranscript(snapshot.meetingFile, finalized.turns, snapshot.enableTimestamps);
       }
     } catch (error) {
       this.options.statusStore.setState({

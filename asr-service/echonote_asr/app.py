@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import logging
-import os
+import tempfile
+from collections.abc import Callable
 from dataclasses import asdict
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeVar
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ from .model import ModelState
 from .diarization import (
     DiarizationState,
     assign_speakers_to_turns,
+    diarization_state_from_environment,
     load_segments_json,
     merge_adjacent_turns,
     write_temp_wav,
@@ -32,6 +33,7 @@ from .text_sanitizer import sanitize_transcript_text
 from .wav import read_valid_wav
 
 logger = logging.getLogger(__name__)
+ThreadResult = TypeVar("ThreadResult")
 
 
 def create_app(
@@ -48,13 +50,11 @@ def create_app(
         allow_headers=["*"],
     )
     model_state = ModelState(default_model, backend=backend)
-    active_diarization_state = diarization_state or DiarizationState(
-        enabled=os.environ.get("ECHONOTE_DIARIZATION_ENABLED", "1") != "0",
-        model_id=os.environ.get("ECHONOTE_DIARIZATION_MODEL_ID", "").strip()
-        or "pyannote/speaker-diarization-community-1",
-    )
+    active_diarization_state = diarization_state or diarization_state_from_environment()
+    diarization_gate = asyncio.Semaphore(1)
     app.state.model_state = model_state
     app.state.diarization_state = active_diarization_state
+    app.state.diarization_gate = diarization_gate
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -171,9 +171,13 @@ def create_app(
         final_turns = live_turns
 
         if enable_diarization:
-            with tempfile.TemporaryDirectory(prefix="echonote-finalize-") as tmp_dir:
-                wav_path = write_temp_wav(tmp_dir, meeting_id, wav_bytes)
-                diarization = await asyncio.to_thread(active_diarization_state.diarize_wav, wav_path)
+            async with diarization_gate:
+                with tempfile.TemporaryDirectory(prefix="echonote-finalize-") as tmp_dir:
+                    wav_path = write_temp_wav(tmp_dir, meeting_id, wav_bytes)
+                    diarization = await run_thread_to_completion(
+                        active_diarization_state.diarize_wav,
+                        wav_path,
+                    )
             diarization_model_id = diarization.model_id
             diarization_status = diarization.status
             diarization_error = diarization.error
@@ -208,3 +212,18 @@ def create_app(
         return asdict(ShutdownResponse(status="shutting_down"))
 
     return app
+
+
+async def run_thread_to_completion(
+    function: Callable[..., ThreadResult],
+    *args: object,
+) -> ThreadResult:
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except Exception:
+            pass
+        raise

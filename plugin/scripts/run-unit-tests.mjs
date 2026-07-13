@@ -14,6 +14,8 @@ const testFiles = [
   "tests/meeting-artifacts.test.ts",
   "tests/markdown-sections.test.ts",
   "tests/silence-detection.test.ts",
+  "tests/transcript-correction-service.test.ts",
+  "tests/transcript-markdown.test.ts",
   "tests/transcript-corrections.test.ts"
 ];
 

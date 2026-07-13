@@ -4,6 +4,28 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.6.0] - 2026-07-13
+
+### Added
+
+- Added optional LLM transcript correction after finalized ASR transcripts are written.
+- Added a manual `EchoNote: Correct Transcript with LLM` command for the current meeting note.
+- Added before-LLM transcript artifacts under `.echonote-artifacts/`.
+- Added transcript correction status to the Obsidian status panel.
+- Added v0.6.0 PRD, technical design, and task documents for LLM transcript correction.
+
+### Changed
+
+- LLM providers now expose a shared text-generation method used by summaries and transcript correction.
+- CPU speaker diarization now uses a balanced sliding-window stride, a bounded PyTorch/BLAS thread budget, and serialized finalization to reduce CPU load and prevent retry overlap.
+- Optional speaker diarization now requires `pyannote.audio` 4.x, and Companion setup detects and repairs incompatible installed versions.
+- Companion v0.6.0 remains source-only; no unsigned macOS app artifact is included as a release asset.
+- Version metadata is aligned for the v0.6.0 plugin, ASR service, Companion, and Obsidian version map.
+
+### Fixed
+
+- Prevented queued or cancelled speaker-finalization requests from starving the shared ASR worker pool or deleting temporary audio before background inference finishes.
+
 ## [0.5.0] - 2026-06-03
 
 ### Added
@@ -86,6 +108,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.6.0]: https://github.com/rebill/EchoNote/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rebill/EchoNote/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rebill/EchoNote/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rebill/EchoNote/compare/v0.2.0...v0.3.0

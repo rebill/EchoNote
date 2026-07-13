@@ -6,6 +6,7 @@ export type AsrServiceStatus = "not_started" | "starting" | "running" | "error";
 export type ModelStatus = "not_loaded" | "loading" | "ready" | "error" | "unknown";
 export type RecordingStatus = "idle" | "starting" | "recording" | "paused" | "stopping" | "error";
 export type SpeakerFinalizationStatus = "idle" | "running" | "succeeded" | "failed";
+export type TranscriptCorrectionStatus = "idle" | "running" | "succeeded" | "failed";
 export type ActiveAsrRuntime = "unknown" | "companion";
 export type CompanionStatus =
   | "unknown"
@@ -35,6 +36,8 @@ export type EchoNoteStatus = {
   lastTranscriptAt: number | null;
   speakerFinalization: SpeakerFinalizationStatus;
   speakerFinalizationMessage: string | null;
+  transcriptCorrection: TranscriptCorrectionStatus;
+  transcriptCorrectionMessage: string | null;
   lastError: EchoNoteError | null;
 };
 
@@ -57,5 +60,7 @@ export const DEFAULT_STATUS: EchoNoteStatus = {
   lastTranscriptAt: null,
   speakerFinalization: "idle",
   speakerFinalizationMessage: null,
+  transcriptCorrection: "idle",
+  transcriptCorrectionMessage: null,
   lastError: null
 };

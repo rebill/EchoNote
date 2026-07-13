@@ -194,11 +194,14 @@ fn install_optional_diarization_if_needed(
     let pyannote_ready = Command::new(python)
         .current_dir(service_dir)
         .arg("-c")
-        .arg("import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pyannote.audio') else 1)")
+        .arg(setup_detector::DIARIZATION_DEPENDENCY_PROBE)
         .status()
         .is_ok_and(|status| status.success());
     if pyannote_ready {
-        log_setup(log_store, "Optional speaker diarization dependency is installed.");
+        log_setup(
+            log_store,
+            "Optional speaker diarization dependency is installed.",
+        );
         return;
     }
 

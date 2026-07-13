@@ -1,4 +1,4 @@
-import type { LlmProvider, LlmProviderConfig, MeetingSummary, SummaryRequest } from "./llm-types";
+import type { LlmProvider, LlmProviderConfig, LlmTextRequest, MeetingSummary, SummaryRequest } from "./llm-types";
 import { buildSummarySystemPrompt, buildSummaryUserPrompt, parseMeetingSummary } from "./summary-json";
 
 type AnthropicMessagesResponse = {
@@ -14,6 +14,16 @@ export class AnthropicProvider implements LlmProvider {
   constructor(private readonly config: LlmProviderConfig) {}
 
   async generateSummary(request: SummaryRequest): Promise<MeetingSummary> {
+    const content = await this.generateText({
+      systemPrompt: buildSummarySystemPrompt(request.language),
+      userPrompt: buildSummaryUserPrompt(request.transcript, request.prompt),
+      temperature: 0.2
+    });
+
+    return parseMeetingSummary(content);
+  }
+
+  async generateText(request: LlmTextRequest): Promise<string> {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -23,13 +33,13 @@ export class AnthropicProvider implements LlmProvider {
       },
       body: JSON.stringify({
         model: this.config.model,
-        max_tokens: 2048,
-        temperature: 0.2,
-        system: buildSummarySystemPrompt(request.language),
+        max_tokens: 4096,
+        temperature: request.temperature ?? 0.2,
+        system: request.systemPrompt,
         messages: [
           {
             role: "user",
-            content: buildSummaryUserPrompt(request.transcript, request.prompt)
+            content: request.userPrompt
           }
         ]
       })
@@ -46,6 +56,6 @@ export class AnthropicProvider implements LlmProvider {
       throw new Error("Anthropic response did not contain text content.");
     }
 
-    return parseMeetingSummary(content);
+    return content;
   }
 }

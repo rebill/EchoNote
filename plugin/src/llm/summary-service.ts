@@ -1,7 +1,6 @@
 import type { EchoNoteSettings } from "../settings/settings";
-import { AnthropicProvider } from "./anthropic-provider";
-import type { LlmProvider, MeetingSummary } from "./llm-types";
-import { OpenAiCompatibleProvider } from "./openai-compatible-provider";
+import { createLlmProvider } from "./llm-provider-factory";
+import type { MeetingSummary } from "./llm-types";
 
 const MAX_TRANSCRIPT_CHARS = 20000;
 
@@ -12,7 +11,7 @@ export class SummaryService {
       throw new Error("Transcript is empty.");
     }
 
-    const provider = this.createProvider(settings);
+    const provider = createLlmProvider(settings);
     if (normalizedTranscript.length <= MAX_TRANSCRIPT_CHARS) {
       return provider.generateSummary({
         transcript: normalizedTranscript,
@@ -39,26 +38,6 @@ export class SummaryService {
     });
   }
 
-  private createProvider(settings: EchoNoteSettings): LlmProvider {
-    if (settings.llmProvider === "anthropic") {
-      if (!settings.anthropicApiKey || !settings.anthropicModel) {
-        throw new Error("Anthropic API key and model are required.");
-      }
-      return new AnthropicProvider({
-        apiKey: settings.anthropicApiKey,
-        model: settings.anthropicModel
-      });
-    }
-
-    if (!settings.openaiApiKey || !settings.openaiModel || !settings.openaiBaseUrl) {
-      throw new Error("OpenAI-compatible API key, base URL, and model are required.");
-    }
-    return new OpenAiCompatibleProvider({
-      apiKey: settings.openaiApiKey,
-      baseUrl: settings.openaiBaseUrl,
-      model: settings.openaiModel
-    });
-  }
 }
 
 function splitText(text: string, maxChars: number): string[] {

@@ -131,6 +131,16 @@ export class EchoNoteSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName("Enable LLM transcript correction")
+      .setDesc("Experimental and disabled by default. Sends final transcripts to the current LLM provider for conservative typo checks; terminology rules are more reliable.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableLlmTranscriptCorrection).onChange(async (value) => {
+          this.plugin.settings.enableLlmTranscriptCorrection = value;
+          await this.plugin.saveSettings();
+        })
+      );
   }
 
   private renderAudioSettings(containerEl: HTMLElement): void {
@@ -244,7 +254,7 @@ export class EchoNoteSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("LLM provider")
-      .setDesc("Provider used for meeting summaries.")
+      .setDesc("Provider used for meeting summaries and optional transcript correction.")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("openai-compatible", "OpenAI-compatible")
@@ -258,7 +268,7 @@ export class EchoNoteSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("OpenAI-compatible base URL")
-      .setDesc("Used by OpenAI-compatible summary providers.")
+      .setDesc("Used by OpenAI-compatible LLM features.")
       .addText((text) =>
         text
           .setPlaceholder("https://api.openai.com/v1")

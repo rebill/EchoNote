@@ -48,6 +48,30 @@ CLI options:
 
 Logs are emitted as JSON lines.
 
+## Speaker Diarization Performance
+
+Speaker diarization is serialized so retries cannot run multiple pyannote pipelines at the same time. On CPU,
+EchoNote uses a balanced 20% segmentation step (80% overlap) and a two-thread compute budget by default. CUDA
+and MPS keep pyannote's original 10% segmentation step unless explicitly overridden. The current community-1
+pipeline requires `pyannote.audio` 4.x.
+
+The defaults can be tuned with environment variables:
+
+- `ECHONOTE_DIARIZATION_DEVICE`: `auto`, `cpu`, `cuda`, or `mps`.
+- `ECHONOTE_DIARIZATION_CPU_THREADS`: positive integer; defaults to at most `2`.
+- `ECHONOTE_DIARIZATION_SEGMENTATION_STEP`: value from `0.05` to `1.0`. Use `0.1` for pyannote's original
+  maximum-accuracy setting; larger values reduce overlapping inference windows and CPU work but may miss short
+  speaker changes.
+
+For example, the lowest-impact CPU profile is:
+
+```bash
+ECHONOTE_DIARIZATION_DEVICE=cpu \
+ECHONOTE_DIARIZATION_CPU_THREADS=1 \
+ECHONOTE_DIARIZATION_SEGMENTATION_STEP=0.2 \
+python -m echonote_asr --backend mlx-audio
+```
+
 ## Real ASR Spike
 
 Use a 16kHz mono PCM16 WAV file:
