@@ -35,6 +35,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
+      - name: Verify release metadata
+        run: npm run verify:release-metadata
+
       - name: Build
         run: npm run build
 

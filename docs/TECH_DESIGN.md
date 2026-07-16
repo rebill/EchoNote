@@ -738,6 +738,7 @@ type SummaryRequest = {
 };
 
 type MeetingSummary = {
+  meetingTitle: string;
   summary: string;
   decisions: string[];
   actionItems: string[];

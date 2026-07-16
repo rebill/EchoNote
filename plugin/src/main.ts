@@ -4,9 +4,12 @@ import { AsrRuntimeResolutionError, resolveAsrRuntime } from "./asr/asr-runtime-
 import { AsrServiceClient } from "./asr/asr-service-client";
 import { resolveCompanionDiscovery } from "./asr/companion-discovery";
 import type { FinalizeTranscriptResponse, TranscriptTurn } from "./asr/asr-types";
-import { MeetingNoteWriter } from "./meeting/meeting-note-writer";
+import { MeetingNoteWriter, type SummaryWriteResult } from "./meeting/meeting-note-writer";
 import { MeetingSessionController } from "./meeting/meeting-session";
+import { resolveMeetingTarget } from "./meeting/meeting-target";
 import { SummaryService } from "./llm/summary-service";
+import { MeetingSummaryParseError } from "./llm/summary-json";
+import type { MeetingSummary } from "./llm/llm-types";
 import { TranscriptCorrectionService } from "./llm/transcript-correction-service";
 import { EchoNoteSettingTab } from "./settings/settings-tab";
 import { DEFAULT_SETTINGS, normalizeAutoStopSilenceMinutes, type EchoNoteSettings } from "./settings/settings";
@@ -18,7 +21,7 @@ import {
 import { StatusStore } from "./status/status-store";
 import type { EchoNoteStatus } from "./status/status-types";
 import { ECHONOTE_STATUS_VIEW_TYPE, EchoNoteStatusView } from "./status/status-view";
-import { createEchoNoteError } from "./utils/errors";
+import { createEchoNoteError, type EchoNoteErrorCode } from "./utils/errors";
 import {
   getMeetingArtifactBaseName,
   getMeetingArtifactPaths,
@@ -42,6 +45,7 @@ export default class EchoNotePlugin extends Plugin {
   private meetingSession: MeetingSessionController | null = null;
   private summaryService = new SummaryService();
   private transcriptCorrectionService = new TranscriptCorrectionService();
+  private summarizingMeeting = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -261,18 +265,54 @@ export default class EchoNotePlugin extends Plugin {
     if (!this.noteWriter) {
       return;
     }
-
-    const file = this.resolveMeetingTargetFile();
-    if (!file) {
-      new Notice("EchoNote could not find a meeting note to summarize.");
+    if (this.summarizingMeeting) {
+      new Notice("EchoNote is already generating a meeting summary.");
       return;
     }
 
+    this.summarizingMeeting = true;
     try {
+      const file = await this.resolveMeetingTargetFile();
+      if (!file) {
+        new Notice("EchoNote could not find a verified meeting note to summarize.");
+        return;
+      }
+
       new Notice("EchoNote: generating meeting summary...");
-      const transcript = await this.noteWriter.readTranscript(file);
-      const summary = await this.summaryService.summarize(transcript, this.settings);
-      const summarizedFile = await this.noteWriter.writeSummary(file, summary, this.settings);
+      let transcript: string;
+      try {
+        transcript = await this.noteWriter.readTranscript(file);
+      } catch (error) {
+        this.reportSummaryFailure("NOTE_WRITE_FAILED", "Failed to read the meeting transcript.", error);
+        return;
+      }
+      if (!transcript.trim()) {
+        new Notice("EchoNote transcript is empty. The meeting note was not changed.");
+        return;
+      }
+
+      let summary: MeetingSummary;
+      try {
+        summary = await this.summaryService.summarize(transcript, this.settings);
+      } catch (error) {
+        const code = error instanceof MeetingSummaryParseError
+          ? "LLM_RESPONSE_PARSE_FAILED"
+          : isLlmConfigError(error)
+            ? "LLM_CONFIG_MISSING"
+            : "LLM_REQUEST_FAILED";
+        this.reportSummaryFailure(code, "Failed to generate a valid meeting summary.", error);
+        return;
+      }
+
+      let writeResult: SummaryWriteResult;
+      try {
+        writeResult = await this.noteWriter.writeSummary(file, summary, this.settings);
+      } catch (error) {
+        this.reportSummaryFailure("NOTE_WRITE_FAILED", "Failed to write the meeting summary.", error);
+        return;
+      }
+
+      const summarizedFile = writeResult.file;
       this.meetingSession?.updateCurrentMeetingFile(file, summarizedFile);
       this.statusStore.setState({
         currentMeetingPath: summarizedFile.path,
@@ -280,14 +320,11 @@ export default class EchoNotePlugin extends Plugin {
         lastError: null
       });
       new Notice(`EchoNote summary written: ${summarizedFile.basename}`);
-    } catch (error) {
-      this.statusStore.setState({
-        lastError: createEchoNoteError("LLM_REQUEST_FAILED", "Failed to summarize meeting.", {
-          detail: error instanceof Error ? error.message : String(error),
-          recoverable: true
-        })
-      });
-      new Notice(`EchoNote summary failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (writeResult.artifactWarning) {
+        new Notice(`EchoNote warning: ${writeResult.artifactWarning}`);
+      }
+    } finally {
+      this.summarizingMeeting = false;
     }
   }
 
@@ -302,7 +339,7 @@ export default class EchoNotePlugin extends Plugin {
     }
 
     this.setSpeakerFinalizationStatus("running", "Checking the active meeting note...");
-    const file = this.resolveMeetingTargetFile();
+    const file = await this.resolveMeetingTargetFile();
     if (!file) {
       this.setSpeakerFinalizationStatus("failed", "No active Markdown meeting note was found.");
       new Notice("EchoNote could not find a meeting note to re-finalize.");
@@ -393,7 +430,7 @@ export default class EchoNotePlugin extends Plugin {
       return;
     }
 
-    const file = this.resolveMeetingTargetFile();
+    const file = await this.resolveMeetingTargetFile();
     if (!file) {
       new Notice("EchoNote could not find a meeting note to correct.");
       return;
@@ -476,18 +513,33 @@ export default class EchoNotePlugin extends Plugin {
     }
   }
 
-  private resolveMeetingTargetFile(): TFile | null {
+  private async resolveMeetingTargetFile(): Promise<TFile | null> {
     const currentMeetingFile = this.meetingSession?.getCurrentMeetingFile();
-    if (currentMeetingFile) {
-      return currentMeetingFile;
-    }
-
     const activeFile = this.app.workspace.getActiveFile();
-    if (activeFile?.extension === "md") {
-      return activeFile;
-    }
+    const currentMeetingPath = this.statusStore.getState().currentMeetingPath;
+    const storedMeetingFile = currentMeetingPath ? this.getVaultFile(currentMeetingPath) : null;
+    return resolveMeetingTarget({
+      currentMeeting: currentMeetingFile ?? null,
+      activeMeetingCandidate: activeFile?.extension === "md" ? activeFile : null,
+      storedMeetingCandidate: storedMeetingFile,
+      isVerifiedMeeting: (file) => this.isVerifiedMeetingFile(file)
+    });
+  }
 
-    return null;
+  private async isVerifiedMeetingFile(file: TFile): Promise<boolean> {
+    try {
+      return await this.noteWriter?.isMeetingNote(file) ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  private reportSummaryFailure(code: EchoNoteErrorCode, message: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    this.statusStore.setState({
+      lastError: createEchoNoteError(code, message, { detail, recoverable: true })
+    });
+    new Notice(`EchoNote summary failed: ${detail}`);
   }
 
   private resolveSavedMeetingArtifacts(meetingFile: TFile): SavedMeetingArtifacts {

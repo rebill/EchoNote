@@ -1,5 +1,12 @@
 import type { MeetingSummary } from "./llm-types";
 
+export class MeetingSummaryParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MeetingSummaryParseError";
+  }
+}
+
 export function buildSummarySystemPrompt(language: string): string {
   return [
     "You summarize meeting transcripts for EchoNote.",
@@ -22,15 +29,26 @@ export function buildSummaryUserPrompt(transcript: string, customPrompt: string)
 
 export function parseMeetingSummary(rawText: string): MeetingSummary {
   const jsonText = extractJson(rawText);
-  const parsed = JSON.parse(jsonText) as Partial<MeetingSummary>;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText) as unknown;
+  } catch (error) {
+    throw new MeetingSummaryParseError(
+      `Meeting summary was not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (!isRecord(parsed)) {
+    throw new MeetingSummaryParseError("Meeting summary JSON must be an object.");
+  }
 
   return {
-    meetingTitle: normalizeString(parsed.meetingTitle),
-    summary: normalizeString(parsed.summary),
-    decisions: normalizeStringArray(parsed.decisions),
-    actionItems: normalizeStringArray(parsed.actionItems),
-    keyPoints: normalizeStringArray(parsed.keyPoints),
-    openQuestions: normalizeStringArray(parsed.openQuestions)
+    meetingTitle: requireNonEmptyString(parsed.meetingTitle, "meetingTitle"),
+    summary: requireNonEmptyString(parsed.summary, "summary"),
+    decisions: requireStringArray(parsed.decisions, "decisions"),
+    actionItems: requireStringArray(parsed.actionItems, "actionItems"),
+    keyPoints: requireStringArray(parsed.keyPoints, "keyPoints"),
+    openQuestions: requireStringArray(parsed.openQuestions, "openQuestions")
   };
 }
 
@@ -50,14 +68,21 @@ function extractJson(rawText: string): string {
   return trimmed;
 }
 
-function normalizeString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
+function requireNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new MeetingSummaryParseError(`Meeting summary field ${field} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
+    throw new MeetingSummaryParseError(`Meeting summary field ${field} must be an array of strings.`);
   }
 
-  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+  return value.map((item) => item.trim()).filter(Boolean);
 }

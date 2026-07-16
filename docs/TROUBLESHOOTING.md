@@ -233,4 +233,4 @@ Check:
 - Base URL is configured for OpenAI-compatible provider.
 - The meeting note contains a non-empty `## Transcript` section.
 
-EchoNote does not write summary sections if the LLM response cannot be parsed as JSON.
+EchoNote does not write or rename the meeting note if the LLM response is invalid JSON, omits a required summary field, or returns a field with the wrong type.

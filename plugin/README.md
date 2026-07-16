@@ -63,6 +63,12 @@ The correction keeps timestamps, speaker labels, and turn order intact. Before o
 
 You can also run `EchoNote: Correct Transcript with LLM` on the current meeting note. This manual command works even if automatic LLM correction is disabled. For recurring names, projects, and technical terms, the deterministic `wrong => correct` rules are usually more reliable than LLM correction.
 
+## Summary Titles
+
+When a meeting summary succeeds, EchoNote renames the note file and its level-one heading to `YYYY-MM-DD_会议主题`. The meeting date comes from the note metadata when available, and the meeting topic comes from the structured LLM response.
+
+EchoNote validates every required summary field before changing the note. It also verifies meeting-note markers before acting on an active Markdown file, preventing unrelated notes from being summarized or renamed accidentally.
+
 ## Speaker Transcript Retry
 
 When `Save raw audio` is enabled, EchoNote saves both the meeting WAV and a matching `*.segments.json` file in the configured audio folder.
