@@ -272,8 +272,14 @@ export default class EchoNotePlugin extends Plugin {
       new Notice("EchoNote: generating meeting summary...");
       const transcript = await this.noteWriter.readTranscript(file);
       const summary = await this.summaryService.summarize(transcript, this.settings);
-      await this.noteWriter.writeSummary(file, summary);
-      new Notice("EchoNote summary written.");
+      const summarizedFile = await this.noteWriter.writeSummary(file, summary, this.settings);
+      this.meetingSession?.updateCurrentMeetingFile(file, summarizedFile);
+      this.statusStore.setState({
+        currentMeetingPath: summarizedFile.path,
+        currentMeetingTitle: summarizedFile.basename,
+        lastError: null
+      });
+      new Notice(`EchoNote summary written: ${summarizedFile.basename}`);
     } catch (error) {
       this.statusStore.setState({
         lastError: createEchoNoteError("LLM_REQUEST_FAILED", "Failed to summarize meeting.", {

@@ -53,6 +53,7 @@ function renderPartialSummaries(summaries: MeetingSummary[]): string {
     .map((summary, index) =>
       [
         `Partial Summary ${index + 1}`,
+        `Meeting Title: ${summary.meetingTitle}`,
         `Summary: ${summary.summary}`,
         `Decisions: ${summary.decisions.join("; ")}`,
         `Action Items: ${summary.actionItems.join("; ")}`,

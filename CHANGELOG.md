@@ -4,6 +4,13 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.7.0] - 2026-07-13
+
+### Changed
+
+- Meeting summaries now generate a concise meeting topic and rename both the Obsidian note file and its level-one heading to `YYYY-MM-DD_会议主题`.
+- Saved meeting audio and transcript-segment artifacts follow the summarized meeting title when possible.
+
 ## [0.6.0] - 2026-07-13
 
 ### Added
@@ -108,6 +115,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.7.0]: https://github.com/rebill/EchoNote/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rebill/EchoNote/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rebill/EchoNote/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rebill/EchoNote/compare/v0.3.0...v0.4.0

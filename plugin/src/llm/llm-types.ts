@@ -1,6 +1,7 @@
 import type { SummaryLanguage } from "../settings/settings";
 
 export type MeetingSummary = {
+  meetingTitle: string;
   summary: string;
   decisions: string[];
   actionItems: string[];

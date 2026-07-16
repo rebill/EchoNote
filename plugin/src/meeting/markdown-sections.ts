@@ -49,6 +49,19 @@ export function replaceMeetingEndTime(markdown: string, endTime: string): string
   return markdown.replace(/^(-[ \t]*Time:[ \t]*[^\n]*?[ \t]+-[ \t]*)[^\n]*$/m, `$1${normalizedEndTime}`);
 }
 
+export function replaceDocumentTitle(markdown: string, title: string): string {
+  const normalizedTitle = title.replace(/[\r\n]+/g, " ").trim();
+  if (!normalizedTitle) {
+    return markdown;
+  }
+
+  if (/^#\s+.+$/m.test(markdown)) {
+    return markdown.replace(/^#\s+.+$/m, `# ${normalizedTitle}`);
+  }
+
+  return `# ${normalizedTitle}\n\n${markdown.trimStart()}`;
+}
+
 function replaceOrInsertSection(markdown: string, heading: SummarySectionHeading, content: string): string {
   const sections = findSections(markdown);
   const existing = sections.find((section) => section.heading === heading);

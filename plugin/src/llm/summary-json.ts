@@ -5,7 +5,8 @@ export function buildSummarySystemPrompt(language: string): string {
     "You summarize meeting transcripts for EchoNote.",
     "Return only valid JSON. Do not wrap it in markdown.",
     "The JSON shape must be:",
-    '{"summary":"...","decisions":["..."],"actionItems":["..."],"keyPoints":["..."],"openQuestions":["..."]}',
+    '{"meetingTitle":"...","summary":"...","decisions":["..."],"actionItems":["..."],"keyPoints":["..."],"openQuestions":["..."]}',
+    "meetingTitle must be a concise meeting topic only, without a date or filename punctuation.",
     `Summary language: ${language}.`
   ].join("\n");
 }
@@ -24,6 +25,7 @@ export function parseMeetingSummary(rawText: string): MeetingSummary {
   const parsed = JSON.parse(jsonText) as Partial<MeetingSummary>;
 
   return {
+    meetingTitle: normalizeString(parsed.meetingTitle),
     summary: normalizeString(parsed.summary),
     decisions: normalizeStringArray(parsed.decisions),
     actionItems: normalizeStringArray(parsed.actionItems),
