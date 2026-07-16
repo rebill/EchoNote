@@ -14,7 +14,7 @@ import {
 import { renderMeetingTemplate } from "./meeting-template";
 import { createSummarizedMeetingTitle } from "./meeting-title";
 import { renameThenWriteNote } from "./note-write-transaction";
-import { applyTranscriptCorrections } from "./transcript-corrections";
+import { applyParsedTranscriptCorrections, parseTranscriptCorrectionRules } from "./transcript-corrections";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
 import { formatTranscriptTurns, parseTranscriptMarkdown, type ParsedTranscript } from "./transcript-markdown";
 import {
@@ -72,13 +72,28 @@ export class MeetingNoteWriter {
     enableTimestamps: boolean,
     correctionRules: string
   ): Promise<void> {
-    const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(segment.started_at_ms)}] ` : "";
-    const text = applyTranscriptCorrections(sanitizeTranscriptText(segment.text), correctionRules);
-    if (!text) {
+    await this.appendTranscriptSegments(file, [segment], enableTimestamps, correctionRules);
+  }
+
+  async appendTranscriptSegments(
+    file: TFile,
+    segments: TranscriptSegment[],
+    enableTimestamps: boolean,
+    correctionRules: string
+  ): Promise<void> {
+    let content = "";
+    const parsedRules = parseTranscriptCorrectionRules(correctionRules);
+    for (const segment of segments) {
+      const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(segment.started_at_ms)}] ` : "";
+      const text = applyParsedTranscriptCorrections(sanitizeTranscriptText(segment.text), parsedRules);
+      if (text) {
+        content += `\n${timestamp}${text}\n`;
+      }
+    }
+    if (!content) {
       return;
     }
-
-    await this.app.vault.append(file, `\n${timestamp}${text}\n`);
+    await this.app.vault.append(file, content);
   }
 
   async replaceTranscript(

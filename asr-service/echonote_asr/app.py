@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Annotated, Literal, TypeVar
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .model import ModelState
 from .diarization import (
@@ -38,7 +40,7 @@ ThreadResult = TypeVar("ThreadResult")
 
 def create_app(
     default_model: str,
-    version: str = "0.4.0",
+    version: str = "0.8.0",
     backend: str = "fake",
     diarization_state: DiarizationState | None = None,
 ) -> FastAPI:
@@ -55,6 +57,7 @@ def create_app(
     app.state.model_state = model_state
     app.state.diarization_state = active_diarization_state
     app.state.diarization_gate = diarization_gate
+    app.router.add_event_handler("shutdown", model_state.close)
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -79,7 +82,8 @@ def create_app(
         started_at_ms: Annotated[int, Form()],
         ended_at_ms: Annotated[int, Form()],
         language: Annotated[Literal["auto", "zh", "en"], Form()] = "auto",
-    ) -> dict[str, object]:
+    ) -> JSONResponse:
+        request_started_at = time.perf_counter()
         current_status = await model_state.status_response()
         if current_status["status"] != ModelLifecycleStatus.READY:
             raise HTTPException(
@@ -107,12 +111,12 @@ def create_app(
             },
         )
         try:
-            transcript_text = await model_state.transcribe_wav_bytes(wav_bytes, chunk_id=chunk_id, language=language)
+            transcription = await model_state.transcribe_wav_bytes(wav_bytes, chunk_id=chunk_id, language=language)
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
         text = sanitize_transcript_text(
-            transcript_text if model_state.backend != "fake" else f"fake transcript for chunk {chunk_id}"
+            transcription.text if model_state.backend != "fake" else f"fake transcript for chunk {chunk_id}"
         )
         turns = [
             TranscriptTurn(
@@ -133,7 +137,22 @@ def create_app(
             language=None if language == "auto" else language,
             model_id=model_state.model_id,
         )
-        return asdict(segment)
+        serialization_started_at = time.perf_counter()
+        response = JSONResponse(content=asdict(segment))
+        response_serialize_ms = (time.perf_counter() - serialization_started_at) * 1_000
+        logger.info(
+            "transcribe_completed",
+            extra={
+                "_chunk_id": chunk_id,
+                "_lock_wait_ms": transcription.lock_wait_ms,
+                "_temp_write_ms": transcription.temp_write_ms,
+                "_inference_ms": transcription.inference_ms,
+                "_cleanup_ms": transcription.cleanup_ms,
+                "_response_serialize_ms": round(response_serialize_ms, 3),
+                "_request_total_ms": round((time.perf_counter() - request_started_at) * 1_000, 3),
+            },
+        )
+        return response
 
     @app.post("/transcript/finalize")
     async def finalize_transcript(
@@ -143,6 +162,7 @@ def create_app(
         language: Annotated[Literal["auto", "zh", "en"], Form()] = "auto",
         enable_diarization: Annotated[bool, Form()] = True,
     ) -> dict[str, object]:
+        finalize_started_at = time.perf_counter()
         if not meeting_id.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="meeting_id is required")
 
@@ -169,21 +189,40 @@ def create_app(
         diarization_error: str | None = None
         speakers = []
         final_turns = live_turns
+        diarization_queue_wait_ms = 0.0
+        temp_write_ms = 0.0
+        diarization_ms = 0.0
+        temp_cleanup_ms = 0.0
+        assignment_ms = 0.0
+        merge_ms = 0.0
 
         if enable_diarization:
+            gate_wait_started_at = time.perf_counter()
             async with diarization_gate:
+                diarization_queue_wait_ms = (time.perf_counter() - gate_wait_started_at) * 1_000
+                cleanup_started_at = 0.0
                 with tempfile.TemporaryDirectory(prefix="echonote-finalize-") as tmp_dir:
+                    write_started_at = time.perf_counter()
                     wav_path = write_temp_wav(tmp_dir, meeting_id, wav_bytes)
+                    temp_write_ms = (time.perf_counter() - write_started_at) * 1_000
+                    diarization_started_at = time.perf_counter()
                     diarization = await run_thread_to_completion(
                         active_diarization_state.diarize_wav,
                         wav_path,
                     )
+                    diarization_ms = (time.perf_counter() - diarization_started_at) * 1_000
+                    cleanup_started_at = time.perf_counter()
+                temp_cleanup_ms = (time.perf_counter() - cleanup_started_at) * 1_000
             diarization_model_id = diarization.model_id
             diarization_status = diarization.status
             diarization_error = diarization.error
             if diarization.status == DiarizationStatus.AVAILABLE:
+                assignment_started_at = time.perf_counter()
                 assigned_turns, speakers = assign_speakers_to_turns(live_turns, diarization.intervals)
+                assignment_ms = (time.perf_counter() - assignment_started_at) * 1_000
+                merge_started_at = time.perf_counter()
                 final_turns = merge_adjacent_turns(assigned_turns)
+                merge_ms = (time.perf_counter() - merge_started_at) * 1_000
             else:
                 final_turns = live_turns
 
@@ -196,7 +235,21 @@ def create_app(
             diarization_status=diarization_status,
             error=diarization_error,
         )
-        return asdict(response)
+        payload = asdict(response)
+        logger.info(
+            "finalize_completed",
+            extra={
+                "_meeting_id": meeting_id,
+                "_diarization_queue_wait_ms": round(diarization_queue_wait_ms, 3),
+                "_temp_write_ms": round(temp_write_ms, 3),
+                "_diarization_ms": round(diarization_ms, 3),
+                "_temp_cleanup_ms": round(temp_cleanup_ms, 3),
+                "_assignment_ms": round(assignment_ms, 3),
+                "_merge_ms": round(merge_ms, 3),
+                "_total_ms": round((time.perf_counter() - finalize_started_at) * 1_000, 3),
+            },
+        )
+        return payload
 
     @app.post("/shutdown")
     async def shutdown() -> dict[str, object]:

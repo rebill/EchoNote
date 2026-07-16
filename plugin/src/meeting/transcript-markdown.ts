@@ -1,5 +1,5 @@
 import type { TranscriptTurn } from "../asr/asr-types";
-import { applyTranscriptCorrections } from "./transcript-corrections";
+import { applyParsedTranscriptCorrections, parseTranscriptCorrectionRules } from "./transcript-corrections";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
 import { formatTranscriptTimestamp } from "../utils/time";
 
@@ -31,19 +31,19 @@ export function formatTranscriptTurns(
   enableTimestamps: boolean,
   correctionRules: string
 ): string {
-  return turns
-    .map((turn) => {
-      const text = applyTranscriptCorrections(sanitizeTranscriptText(turn.text), correctionRules);
-      if (!text) {
-        return "";
-      }
+  const lines: string[] = [];
+  const parsedRules = parseTranscriptCorrectionRules(correctionRules);
+  for (const turn of turns) {
+    const text = applyParsedTranscriptCorrections(sanitizeTranscriptText(turn.text), parsedRules);
+    if (!text) {
+      continue;
+    }
 
-      const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(turn.started_at_ms)}] ` : "";
-      const speaker = turn.speaker ? `${turn.speaker}: ` : "";
-      return `${timestamp}${speaker}${text}`;
-    })
-    .filter(Boolean)
-    .join("\n");
+    const timestamp = enableTimestamps ? `[${formatTranscriptTimestamp(turn.started_at_ms)}] ` : "";
+    const speaker = turn.speaker ? `${turn.speaker}: ` : "";
+    lines.push(`${timestamp}${speaker}${text}`);
+  }
+  return lines.join("\n");
 }
 
 function parseTranscriptLine(line: string, index: number): { turn: TranscriptTurn; hasTimestamp: boolean } {

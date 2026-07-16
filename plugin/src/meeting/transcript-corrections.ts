@@ -36,8 +36,12 @@ export function applyTranscriptCorrections(text: string, rulesText: string): str
     return text;
   }
 
+  return applyParsedTranscriptCorrections(text, parseTranscriptCorrectionRules(rulesText));
+}
+
+export function applyParsedTranscriptCorrections(text: string, rules: TranscriptCorrectionRule[]): string {
   let corrected = text;
-  for (const rule of parseTranscriptCorrectionRules(rulesText)) {
+  for (const rule of rules) {
     corrected = corrected.split(rule.from).join(rule.to);
   }
   return corrected;

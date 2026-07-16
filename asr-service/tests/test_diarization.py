@@ -7,13 +7,16 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+from echonote_asr import diarization as diarization_module
 from echonote_asr.diarization import (
     DEFAULT_ACCELERATOR_SEGMENTATION_STEP,
     DEFAULT_CPU_SEGMENTATION_STEP,
     DiarizationState,
+    MIN_SPEAKER_OVERLAP_RATIO,
     NATIVE_THREAD_ENVIRONMENT_VARIABLES,
     SpeakerInterval,
     assign_speakers_to_turns,
+    best_speaker_for_turn,
     configure_native_thread_environment,
     configure_pipeline_segmentation_step,
     configure_torch_cpu_threads,
@@ -24,7 +27,7 @@ from echonote_asr.diarization import (
     resolve_segmentation_step,
     resolve_torch_device_name,
 )
-from echonote_asr.schemas import DiarizationStatus, TranscriptTurn
+from echonote_asr.schemas import DiarizationStatus, TranscriptSpeaker, TranscriptTurn
 
 
 class DiarizationAssignmentTest(unittest.TestCase):
@@ -65,6 +68,68 @@ class DiarizationAssignmentTest(unittest.TestCase):
 
         self.assertIsNone(assigned[0].speaker)
         self.assertEqual(speakers, [])
+
+    def test_assignment_preserves_original_turn_and_interval_encounter_order(self) -> None:
+        turns = [
+            TranscriptTurn("later", "later", None, 1000, 2000),
+            TranscriptTurn("earlier", "earlier", None, 0, 1000),
+            TranscriptTurn("tie", "tie", None, 2000, 3000),
+        ]
+        intervals = [
+            SpeakerInterval("SPEAKER_B", 2500, 3000),
+            SpeakerInterval("SPEAKER_A", 0, 2000),
+            SpeakerInterval("SPEAKER_A", 2000, 2500),
+        ]
+
+        assigned, speakers = assign_speakers_to_turns(turns, intervals)
+
+        self.assertEqual([turn.id for turn in assigned], ["later", "earlier", "tie"])
+        self.assertEqual([turn.speaker for turn in assigned], ["Speaker 1", "Speaker 1", "Speaker 2"])
+        self.assertEqual([speaker.label for speaker in speakers], ["Speaker 1", "Speaker 2"])
+
+    def test_sweep_assignment_matches_naive_full_scan(self) -> None:
+        turns = [
+            TranscriptTurn(
+                f"turn-{index}",
+                f"text-{index}",
+                None,
+                ((index * 1703) % 20_000),
+                ((index * 1703) % 20_000) + 300 + (index % 7) * 100,
+            )
+            for index in range(120)
+        ]
+        intervals = [
+            SpeakerInterval(
+                f"raw-{index % 5}",
+                ((index * 911) % 20_000),
+                ((index * 911) % 20_000) + 200 + (index % 11) * 80,
+            )
+            for index in range(240)
+        ]
+
+        actual, actual_speakers = assign_speakers_to_turns(turns, intervals)
+        expected, expected_speakers = naive_assign_speakers(turns, intervals)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_speakers, expected_speakers)
+
+    def test_large_assignment_keeps_overlap_checks_near_linear(self) -> None:
+        turns = [
+            TranscriptTurn(f"turn-{index}", "text", None, index * 3000, (index + 1) * 3000)
+            for index in range(2000)
+        ]
+        intervals = [
+            SpeakerInterval(f"raw-{index % 4}", index * 1500, (index + 1) * 1500)
+            for index in range(4000)
+        ]
+
+        with patch(
+            "echonote_asr.diarization.interval_overlap_ms",
+            wraps=diarization_module.interval_overlap_ms,
+        ) as overlap:
+            assign_speakers_to_turns(turns, intervals)
+
+        self.assertLessEqual(overlap.call_count, 8000)
 
     def test_merges_adjacent_same_speaker_conservatively(self) -> None:
         turns = [
@@ -191,6 +256,34 @@ class DiarizationAssignmentTest(unittest.TestCase):
 
         self.assertEqual([result.status for result in results], [DiarizationStatus.AVAILABLE] * 2)
         self.assertEqual(pipeline.max_active_calls, 1)
+
+
+def naive_assign_speakers(
+    turns: list[TranscriptTurn],
+    intervals: list[SpeakerInterval],
+) -> tuple[list[TranscriptTurn], list[TranscriptSpeaker]]:
+    labels: dict[str, str] = {}
+    totals: dict[str, int] = {}
+    assigned: list[TranscriptTurn] = []
+    for turn in turns:
+        raw_speaker, ratio = best_speaker_for_turn(turn, intervals)
+        speaker = None
+        if raw_speaker is not None and ratio >= MIN_SPEAKER_OVERLAP_RATIO:
+            speaker = labels.setdefault(raw_speaker, f"Speaker {len(labels) + 1}")
+            totals[speaker] = totals.get(speaker, 0) + max(0, turn.ended_at_ms - turn.started_at_ms)
+        assigned.append(TranscriptTurn(
+            id=turn.id,
+            text=turn.text,
+            speaker=speaker,
+            started_at_ms=turn.started_at_ms,
+            ended_at_ms=turn.ended_at_ms,
+            confidence=ratio if speaker is not None else turn.confidence,
+        ))
+    speakers = [
+        TranscriptSpeaker(id=f"speaker_{index}", label=label, total_ms=totals.get(label, 0))
+        for index, label in enumerate(labels.values(), start=1)
+    ]
+    return assigned, speakers
 
 
 class FakeDiarizeOutput:

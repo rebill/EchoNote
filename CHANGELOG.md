@@ -4,6 +4,30 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.8.0] - 2026-07-16
+
+### Added
+
+- Added reproducible plugin and ASR performance benchmarks with version-controlled budgets.
+- Added summary progress reporting, ASR phase timings, and diarization finalization timings.
+- Added bounded disk spooling for long meeting audio and coalesced live-transcript writes.
+
+### Changed
+
+- Long transcripts now use boundary-aware chunks, two concurrent partial summaries, targeted retries, and bounded hierarchical merges.
+- WAV assembly now uses bulk byte copies and assembles the complete recording once for saving and finalization.
+- ASR inference is serialized in a reusable temporary workspace with cancellation-safe cleanup.
+- Speaker assignment now uses a sorted sweep/window candidate set while preserving turn order and speaker-label semantics.
+- Transcript formatting parses correction rules once per batch and skips unnecessary repeated-run comparisons.
+- Version metadata is aligned for the v0.8.0 plugin, ASR service, Companion, and Obsidian version map.
+
+### Performance
+
+- Ten-minute WAV concatenation improved from 55.555 ms to 1.864 ms median.
+- Formatting 10,000 transcript turns improved from 52.140 ms to 31.202 ms median.
+- Assigning 2,000 turns against 4,000 speaker intervals improved from 810.371 ms to 5.545 ms median.
+- Reused ASR temporary I/O reduced median overhead from 0.546 ms to 0.254 ms.
+
 ## [0.7.1] - 2026-07-16
 
 ### Fixed
@@ -125,6 +149,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.8.0]: https://github.com/rebill/EchoNote/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/rebill/EchoNote/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rebill/EchoNote/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rebill/EchoNote/compare/v0.5.0...v0.6.0

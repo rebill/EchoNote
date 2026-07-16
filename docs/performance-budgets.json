@@ -1,0 +1,16 @@
+{
+  "plugin": {
+    "wavConcat10MinutesP95Ms": 19,
+    "transcriptFormat10kTurnsP95Ms": 45,
+    "summaryChunkConcurrency": 2,
+    "summaryRequestAttempts": 2,
+    "audioSpoolMemoryThresholdMiB": 32,
+    "transcriptAppendMaxDelayMs": 250
+  },
+  "asr": {
+    "speakerAssignment2kTurns4kIntervalsP95Ms": 80,
+    "speakerAssignmentMaxOverlapChecks": 8000,
+    "maxConcurrentInferenceCalls": 1,
+    "temporaryWorkspaceCount": 1
+  }
+}

@@ -69,6 +69,14 @@ When a meeting summary succeeds, EchoNote renames the note file and its level-on
 
 EchoNote validates every required summary field before changing the note. It also verifies meeting-note markers before acting on an active Markdown file, preventing unrelated notes from being summarized or renamed accidentally.
 
+## Long Meeting Performance
+
+Long summaries use boundary-aware chunks, bounded concurrency, targeted retries, and hierarchical merges. Recording
+audio stays in memory up to 32 MiB of PCM, then spills to a private temporary file; temporary audio is removed after
+stop or startup failure. Live transcript writes are coalesced for up to 250 ms and are force-flushed when stopping.
+
+Run `npm run benchmark:plugin` to measure the large-note, transcript-formatting, WAV, and audio-spool paths.
+
 ## Speaker Transcript Retry
 
 When `Save raw audio` is enabled, EchoNote saves both the meeting WAV and a matching `*.segments.json` file in the configured audio folder.
