@@ -150,6 +150,9 @@ plugin/styles.css
 
 ## Performance Verification
 
+EchoNote v0.8.1 adds Qwen3 language prompting, background model preload with bounded warm-up, and 500 ms forced-cut
+overlap with unique meeting-audio assembly and conservative transcript-boundary deduplication.
+
 EchoNote v0.8.0 includes reproducible local benchmarks for long notes, transcript formatting, WAV assembly, ASR
 temporary I/O, and speaker assignment:
 

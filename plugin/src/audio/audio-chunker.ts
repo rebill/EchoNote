@@ -7,6 +7,7 @@ const DEFAULT_MAX_CHUNK_MS = 15000;
 const DEFAULT_SILENCE_DURATION_MS = 800;
 const DEFAULT_SILENCE_RMS_THRESHOLD = 0.002;
 const DEFAULT_ANALYSIS_FRAME_MS = 20;
+const DEFAULT_FORCED_CHUNK_OVERLAP_MS = 500;
 
 export type AudioChunkerOptions = {
   minChunkMs?: number;
@@ -14,6 +15,12 @@ export type AudioChunkerOptions = {
   silenceDurationMs?: number;
   silenceRmsThreshold?: number;
   analysisFrameMs?: number;
+  forcedChunkOverlapMs?: number;
+};
+
+type ChunkCut = {
+  sampleCount: number;
+  forced: boolean;
 };
 
 export class AudioChunker {
@@ -22,8 +29,10 @@ export class AudioChunker {
   private readonly silenceFrameCount: number;
   private readonly silenceRmsThreshold: number;
   private readonly analysisFrameSamples: number;
+  private readonly forcedChunkOverlapSamples: number;
   private pendingSamples: number[] = [];
-  private emittedSamples = 0;
+  private pendingStartedAtSample = 0;
+  private pendingOverlapSamples = 0;
   private nextChunkIndex = 1;
 
   constructor(chunkLengthSeconds: number, options: AudioChunkerOptions = {}) {
@@ -34,6 +43,10 @@ export class AudioChunker {
     this.minChunkSamples = msToSamples(options.minChunkMs ?? DEFAULT_MIN_CHUNK_MS);
     this.maxChunkSamples = msToSamples(options.maxChunkMs ?? maxChunkMs);
     this.analysisFrameSamples = msToSamples(options.analysisFrameMs ?? DEFAULT_ANALYSIS_FRAME_MS);
+    this.forcedChunkOverlapSamples = Math.min(
+      msToOptionalSamples(options.forcedChunkOverlapMs ?? DEFAULT_FORCED_CHUNK_OVERLAP_MS),
+      Math.max(0, this.maxChunkSamples - this.analysisFrameSamples)
+    );
     this.silenceFrameCount = Math.max(
       1,
       Math.ceil((options.silenceDurationMs ?? DEFAULT_SILENCE_DURATION_MS) / (options.analysisFrameMs ?? DEFAULT_ANALYSIS_FRAME_MS))
@@ -56,23 +69,34 @@ export class AudioChunker {
     }
 
     const samples = this.pendingSamples.splice(0);
-    return this.createChunk(samples);
+    const chunk = this.createChunk(samples, this.pendingStartedAtSample, this.pendingOverlapSamples);
+    this.pendingStartedAtSample += samples.length;
+    this.pendingOverlapSamples = 0;
+    return chunk;
   }
 
   private drainFullChunks(): AudioChunk[] {
     const chunks: AudioChunk[] = [];
     while (true) {
-      const cutSampleCount = this.findNextCutSampleCount();
-      if (cutSampleCount === null) {
+      const cut = this.findNextCut();
+      if (cut === null) {
         break;
       }
-      const samples = this.pendingSamples.splice(0, cutSampleCount);
-      chunks.push(this.createChunk(samples));
+      const samples = this.pendingSamples.slice(0, cut.sampleCount);
+      chunks.push(this.createChunk(samples, this.pendingStartedAtSample, this.pendingOverlapSamples));
+
+      const retainedSamples = cut.forced
+        ? Math.min(this.forcedChunkOverlapSamples, cut.sampleCount - 1)
+        : 0;
+      const consumedSamples = cut.sampleCount - retainedSamples;
+      this.pendingSamples.splice(0, consumedSamples);
+      this.pendingStartedAtSample += consumedSamples;
+      this.pendingOverlapSamples = retainedSamples;
     }
     return chunks;
   }
 
-  private findNextCutSampleCount(): number | null {
+  private findNextCut(): ChunkCut | null {
     if (this.pendingSamples.length < this.minChunkSamples) {
       return null;
     }
@@ -90,21 +114,20 @@ export class AudioChunker {
       }
 
       if (frameEnd >= this.minChunkSamples && silentFrames >= this.silenceFrameCount) {
-        return frameEnd;
+        return { sampleCount: frameEnd, forced: false };
       }
     }
 
     if (this.pendingSamples.length >= this.maxChunkSamples) {
-      return this.maxChunkSamples;
+      return { sampleCount: this.maxChunkSamples, forced: true };
     }
 
     return null;
   }
 
-  private createChunk(samples: number[]): AudioChunk {
-    const startedAtMs = Math.round((this.emittedSamples / TARGET_SAMPLE_RATE) * 1000);
-    this.emittedSamples += samples.length;
-    const endedAtMs = Math.round((this.emittedSamples / TARGET_SAMPLE_RATE) * 1000);
+  private createChunk(samples: number[], startedAtSample: number, overlapSamples: number): AudioChunk {
+    const startedAtMs = Math.round((startedAtSample / TARGET_SAMPLE_RATE) * 1000);
+    const endedAtMs = Math.round(((startedAtSample + samples.length) / TARGET_SAMPLE_RATE) * 1000);
     const chunkIndex = this.nextChunkIndex;
     this.nextChunkIndex += 1;
 
@@ -112,6 +135,7 @@ export class AudioChunker {
       id: `chunk-${String(chunkIndex).padStart(6, "0")}`,
       startedAtMs,
       endedAtMs,
+      overlapSamples,
       wavBytes: encodePcm16Wav(Float32Array.from(samples), TARGET_SAMPLE_RATE),
       createdAt: Date.now(),
       durationMs: endedAtMs - startedAtMs,
@@ -122,6 +146,10 @@ export class AudioChunker {
 
 function msToSamples(ms: number): number {
   return Math.max(1, Math.round((TARGET_SAMPLE_RATE * ms) / 1000));
+}
+
+function msToOptionalSamples(ms: number): number {
+  return Math.max(0, Math.round((TARGET_SAMPLE_RATE * ms) / 1000));
 }
 
 function calculateRms(samples: number[]): number {

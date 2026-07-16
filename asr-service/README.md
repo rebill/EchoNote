@@ -55,6 +55,12 @@ after inference, including failed requests, and the workspace is removed on serv
 `lock_wait_ms`, `temp_write_ms`, `inference_ms`, `cleanup_ms`, and `response_serialize_ms` for transcription.
 Finalization logs include diarization queue wait, model load, inference, assignment, merge, and cleanup durations.
 
+The real `mlx-audio` backend starts loading the configured model in the background as soon as the service starts.
+Before the model reports `ready`, EchoNote runs a bounded one-second warm-up inference so the first meeting chunk does
+not pay the cold-generation cost. API language values are mapped to the Qwen3 prompt names (`zh` -> `Chinese`,
+`en` -> `English`); `auto` keeps model-side language detection enabled. Model load logs include `load_ms`, `warmup_ms`,
+and `warmed_up`.
+
 Run `.venv/bin/python benchmarks/performance_benchmark.py` for the ASR and speaker-assignment benchmarks.
 
 ## Speaker Diarization Performance

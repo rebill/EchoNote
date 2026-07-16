@@ -2,6 +2,7 @@ export type AudioChunk = {
   id: string;
   startedAtMs: number;
   endedAtMs: number;
+  overlapSamples: number;
   wavBytes: ArrayBuffer;
   createdAt: number;
   durationMs: number;

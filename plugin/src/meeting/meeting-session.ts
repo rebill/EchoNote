@@ -17,6 +17,7 @@ import { createEchoNoteError } from "../utils/errors";
 import { getMeetingArtifactPaths, getMeetingAudioFolder, sanitizeMeetingId } from "./meeting-artifacts";
 import { CoalescingBatchWriter } from "./coalescing-batch-writer";
 import { MeetingNoteWriter } from "./meeting-note-writer";
+import { reconcileOverlappingTranscriptSegment } from "./transcript-overlap";
 
 const MIN_TRANSCRIBE_CHUNK_MS = 1000;
 const TRANSCRIPT_APPEND_DELAY_MS = 250;
@@ -354,7 +355,7 @@ export class MeetingSessionController {
   }
 
   private async enqueueChunk(chunk: AudioChunk): Promise<void> {
-    const audioWrite = this.meetingAudio.append(chunk.wavBytes);
+    const audioWrite = this.meetingAudio.append(chunk.wavBytes, chunk.overlapSamples * 2);
     const shouldStopAfterSilence = this.recordSilenceAndShouldAutoStop(chunk);
 
     if (this.shouldSkipTranscription(chunk)) {
@@ -377,7 +378,11 @@ export class MeetingSessionController {
   }
 
   private recordSilenceAndShouldAutoStop(chunk: AudioChunk): boolean {
-    this.consecutiveSilenceMs = nextConsecutiveSilenceMs(this.consecutiveSilenceMs, chunk);
+    const overlapMs = Math.round((chunk.overlapSamples / 16000) * 1000);
+    this.consecutiveSilenceMs = nextConsecutiveSilenceMs(this.consecutiveSilenceMs, {
+      durationMs: Math.max(0, chunk.durationMs - overlapMs),
+      rms: chunk.rms
+    });
     const settings = this.options.getSettings();
     if (!this.started || this.stopping || !settings.autoStopOnSilence) {
       return false;
@@ -428,7 +433,12 @@ export class MeetingSessionController {
 
     const settings = this.options.getSettings();
     try {
-      const segment = await client.transcribe(chunk, settings.summaryLanguage === "en" ? "en" : "zh");
+      const transcription = await client.transcribe(chunk, settings.summaryLanguage === "en" ? "en" : "zh");
+      const previousSegment = this.liveSegments[this.liveSegments.length - 1];
+      const segment = reconcileOverlappingTranscriptSegment(previousSegment, transcription);
+      if (!segment) {
+        return;
+      }
       this.liveSegments.push(segment);
       this.transcriptAppendBuffer.enqueue({
         file: meetingFile,

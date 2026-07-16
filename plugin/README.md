@@ -73,7 +73,10 @@ EchoNote validates every required summary field before changing the note. It als
 
 Long summaries use boundary-aware chunks, bounded concurrency, targeted retries, and hierarchical merges. Recording
 audio stays in memory up to 32 MiB of PCM, then spills to a private temporary file; temporary audio is removed after
-stop or startup failure. Live transcript writes are coalesced for up to 250 ms and are force-flushed when stopping.
+stop or startup failure. Continuous speech that reaches the forced 15-second boundary retains 500 ms in the next ASR
+chunk to avoid clipped words. The retained audio is excluded from the complete meeting WAV, and exact repeated Chinese
+characters or English words are conservatively removed from the next live segment. Live transcript writes are
+coalesced for up to 250 ms and are force-flushed when stopping.
 
 Run `npm run benchmark:plugin` to measure the large-note, transcript-formatting, WAV, and audio-spool paths.
 

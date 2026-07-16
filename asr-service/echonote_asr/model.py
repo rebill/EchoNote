@@ -78,9 +78,28 @@ class ModelState:
                 extra={"_model_id": active_model_id, "_status": self._status.value},
             )
 
+        load_started_at = time.perf_counter()
+        load_ms = 0.0
+        warmup_ms = 0.0
+        warmed_up = False
         try:
             async with self._inference_lock:
                 await run_thread_to_completion(self._transcriber.load, active_model_id)
+                load_ms = elapsed_ms(load_started_at)
+                warmup = getattr(self._transcriber, "warmup", None)
+                if callable(warmup) and self._backend != "fake":
+                    warmup_started_at = time.perf_counter()
+                    try:
+                        await run_thread_to_completion(warmup, language="zh")
+                        warmed_up = True
+                    except Exception:
+                        logger.warning(
+                            "model_warmup_failed",
+                            exc_info=True,
+                            extra={"_model_id": active_model_id, "_backend": self._backend},
+                        )
+                    finally:
+                        warmup_ms = elapsed_ms(warmup_started_at)
             if self._backend == "fake":
                 await asyncio.sleep(0.5)
         except Exception as exc:
@@ -97,7 +116,13 @@ class ModelState:
             self._status = ModelLifecycleStatus.READY
             logger.info(
                 "model_load_completed",
-                extra={"_model_id": self._model_id, "_status": self._status.value},
+                extra={
+                    "_model_id": self._model_id,
+                    "_status": self._status.value,
+                    "_load_ms": round(load_ms, 3),
+                    "_warmup_ms": round(warmup_ms, 3),
+                    "_warmed_up": warmed_up,
+                },
             )
             return asdict(ModelLoadResponse(model_id=self._model_id, status=self._status))
 
