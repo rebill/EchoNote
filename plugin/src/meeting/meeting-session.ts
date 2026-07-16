@@ -14,7 +14,7 @@ import type { EchoNoteSettings } from "../settings/settings";
 import { createAsrRuntimeStatus, createCompanionResolutionStatus } from "../status/companion-status";
 import type { StatusStore } from "../status/status-store";
 import { createEchoNoteError } from "../utils/errors";
-import { sanitizeMeetingId } from "./meeting-artifacts";
+import { getMeetingArtifactPaths, getMeetingAudioFolder, sanitizeMeetingId } from "./meeting-artifacts";
 import { MeetingNoteWriter } from "./meeting-note-writer";
 
 const MIN_TRANSCRIBE_CHUNK_MS = 1000;
@@ -272,6 +272,26 @@ export class MeetingSessionController {
 
   getCurrentMeetingFile(): TFile | null {
     return this.meetingFile;
+  }
+
+  updateCurrentMeetingFile(previousFile: TFile, renamedFile: TFile): void {
+    if (this.meetingFile !== previousFile) {
+      return;
+    }
+
+    this.meetingFile = renamedFile;
+    this.meetingTitle = renamedFile.basename;
+    this.meetingAudioFolder = getMeetingAudioFolder(this.options.getSettings(), renamedFile.basename);
+    if (this.savedMeetingAudioPath) {
+      this.savedMeetingAudioPath = getMeetingArtifactPaths(
+        this.options.getSettings(),
+        renamedFile.basename
+      ).audioPath;
+    }
+    this.options.statusStore.setState({
+      currentMeetingPath: renamedFile.path,
+      currentMeetingTitle: renamedFile.basename
+    });
   }
 
   private async ensureAsrService(client: AsrServiceClient): Promise<void> {

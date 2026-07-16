@@ -12,11 +12,13 @@ const testFiles = [
   "tests/audio-chunker.test.ts",
   "tests/companion-discovery.test.ts",
   "tests/meeting-artifacts.test.ts",
+  "tests/meeting-title.test.ts",
   "tests/markdown-sections.test.ts",
   "tests/silence-detection.test.ts",
   "tests/transcript-correction-service.test.ts",
   "tests/transcript-markdown.test.ts",
-  "tests/transcript-corrections.test.ts"
+  "tests/transcript-corrections.test.ts",
+  "tests/summary-json.test.ts"
 ];
 
 for (const testFile of testFiles) {

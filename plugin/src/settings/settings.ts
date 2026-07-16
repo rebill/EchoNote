@@ -72,7 +72,7 @@ _Pending._
 ## Transcript
 `;
 
-export const DEFAULT_SUMMARY_PROMPT = `You are EchoNote's meeting summarizer. Return structured JSON with summary, decisions, actionItems, keyPoints, and openQuestions.`;
+export const DEFAULT_SUMMARY_PROMPT = `You are EchoNote's meeting summarizer. Return structured JSON with meetingTitle, summary, decisions, actionItems, keyPoints, and openQuestions.`;
 
 export const DEFAULT_SETTINGS: EchoNoteSettings = {
   meetingFolder: "Meetings",

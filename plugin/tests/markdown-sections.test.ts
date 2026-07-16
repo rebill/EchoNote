@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractTranscript, replaceMeetingEndTime, replaceTranscriptSection } from "../src/meeting/markdown-sections";
+import {
+  extractTranscript,
+  replaceDocumentTitle,
+  replaceMeetingEndTime,
+  replaceTranscriptSection
+} from "../src/meeting/markdown-sections";
 
 test("replaceTranscriptSection replaces only transcript content", () => {
   const markdown = `# Meeting
@@ -43,4 +48,18 @@ test("replaceMeetingEndTime writes the stop time in the default metadata line", 
 
   assert.match(updated, /- Time: 09:03:03 - 09:08:42/);
   assert.equal(extractTranscript(updated), "[00:00] hello");
+});
+
+test("replaceDocumentTitle updates only the level-one document title", () => {
+  const markdown = `# Old title
+
+## Summary
+
+Keep this section.
+`;
+
+  const updated = replaceDocumentTitle(markdown, "2026-07-13_产品复盘");
+
+  assert.match(updated, /^# 2026-07-13_产品复盘$/m);
+  assert.match(updated, /^## Summary$/m);
 });
