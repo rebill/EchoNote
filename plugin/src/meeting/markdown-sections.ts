@@ -20,6 +20,28 @@ export function extractTranscript(markdown: string): string {
   return markdown.slice(transcriptSection.contentStartIndex, transcriptSection.endIndex).trim();
 }
 
+export function isEchoNoteMeetingNote(markdown: string): boolean {
+  const sections = findSections(markdown);
+  const transcript = sections.find((section) => section.heading === "Transcript");
+  if (!transcript) {
+    return false;
+  }
+
+  const noteHeader = markdown.slice(0, transcript.startIndex);
+  if (
+    /<!--\s*echonote-meeting\s*-->/i.test(noteHeader)
+    || /^\s*-?\s*Platform:\s*EchoNote\s*$/im.test(noteHeader)
+    || /(^|\s)#echonote\b/i.test(noteHeader)
+  ) {
+    return true;
+  }
+
+  const headingsBeforeTranscript = new Set(
+    sections.filter((section) => section.startIndex < transcript.startIndex).map((section) => section.heading)
+  );
+  return SUMMARY_SECTION_HEADINGS.every((heading) => headingsBeforeTranscript.has(heading));
+}
+
 export function replaceSummarySections(markdown: string, content: SummarySectionContent): string {
   let nextMarkdown = markdown;
   for (const heading of SUMMARY_SECTION_HEADINGS) {

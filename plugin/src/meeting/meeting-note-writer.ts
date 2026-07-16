@@ -5,6 +5,7 @@ import { formatClockTime, formatMeetingTitle, formatTranscriptTimestamp, pad2, s
 import type { MeetingSummary } from "../llm/llm-types";
 import {
   extractTranscript,
+  isEchoNoteMeetingNote,
   replaceDocumentTitle,
   replaceMeetingEndTime,
   replaceSummarySections,
@@ -12,6 +13,7 @@ import {
 } from "./markdown-sections";
 import { renderMeetingTemplate } from "./meeting-template";
 import { createSummarizedMeetingTitle } from "./meeting-title";
+import { renameThenWriteNote } from "./note-write-transaction";
 import { applyTranscriptCorrections } from "./transcript-corrections";
 import { sanitizeTranscriptText } from "./transcript-sanitizer";
 import { formatTranscriptTurns, parseTranscriptMarkdown, type ParsedTranscript } from "./transcript-markdown";
@@ -33,6 +35,11 @@ export type MeetingNoteInfo = {
   file: TFile;
   title: string;
   audioFolder: string;
+};
+
+export type SummaryWriteResult = {
+  file: TFile;
+  artifactWarning: string | null;
 };
 
 export class MeetingNoteWriter {
@@ -139,6 +146,10 @@ export class MeetingNoteWriter {
     return extractTranscript(content);
   }
 
+  async isMeetingNote(file: TFile): Promise<boolean> {
+    return isEchoNoteMeetingNote(await this.app.vault.read(file));
+  }
+
   async readParsedTranscript(file: TFile): Promise<ParsedTranscript> {
     return parseTranscriptMarkdown(await this.readTranscript(file));
   }
@@ -170,8 +181,9 @@ export class MeetingNoteWriter {
     }
   }
 
-  async writeSummary(file: TFile, summary: MeetingSummary, settings: EchoNoteSettings): Promise<TFile> {
+  async writeSummary(file: TFile, summary: MeetingSummary, settings: EchoNoteSettings): Promise<SummaryWriteResult> {
     const previousTitle = file.basename;
+    const previousPath = file.path;
     const content = await this.app.vault.read(file);
     const title = createSummarizedMeetingTitle(
       content,
@@ -191,14 +203,24 @@ export class MeetingNoteWriter {
       "Open Questions": formatBullets(summary.openQuestions)
     });
     const updated = replaceDocumentTitle(summarized, resolvedTitle);
-    await this.app.vault.modify(file, updated);
-    const renamedFile = await this.renameMeetingNote(file, targetPath);
+    const renamedFile = await renameThenWriteNote({
+      file,
+      previousPath,
+      targetPath,
+      content: updated,
+      getPath: (item) => item.path,
+      rename: (item, path) => this.renameMeetingNote(item, path),
+      write: (item, nextContent) => this.app.vault.modify(item, nextContent)
+    });
+
+    let artifactWarning: string | null = null;
     try {
       await this.renameMeetingArtifacts(settings, previousTitle, renamedFile.basename);
     } catch (error) {
-      console.warn("EchoNote could not rename saved meeting artifacts with the summarized note.", error);
+      artifactWarning = `Saved meeting artifacts were not fully renamed: ${formatError(error)}`;
+      console.warn(artifactWarning, error);
     }
-    return renamedFile;
+    return { file: renamedFile, artifactWarning };
   }
 
   private async renameMeetingNote(file: TFile, path: string): Promise<TFile> {
@@ -231,12 +253,22 @@ export class MeetingNoteWriter {
 
     const previousPaths = getMeetingArtifactPaths(settings, previousTitle);
     const renamedPaths = getMeetingArtifactPaths(settings, renamedTitle);
+    this.assertArtifactTargetAvailable(previousFolder, previousPaths.audioPath, renamedPaths.audioPath);
+    this.assertArtifactTargetAvailable(previousFolder, previousPaths.segmentsPath, renamedPaths.segmentsPath);
     await this.app.fileManager.renameFile(artifactFolder, renamedFolder);
 
     const movedAudioPath = normalizePath(`${renamedFolder}/${previousPaths.audioPath.split("/").pop() ?? ""}`);
     const movedSegmentsPath = normalizePath(`${renamedFolder}/${previousPaths.segmentsPath.split("/").pop() ?? ""}`);
     await this.renameArtifactFile(movedAudioPath, renamedPaths.audioPath);
     await this.renameArtifactFile(movedSegmentsPath, renamedPaths.segmentsPath);
+  }
+
+  private assertArtifactTargetAvailable(folder: string, currentPath: string, targetPath: string): void {
+    const targetName = targetPath.split("/").pop() ?? "";
+    const targetBeforeFolderMove = normalizePath(`${folder}/${targetName}`);
+    if (targetBeforeFolderMove !== currentPath && this.app.vault.getAbstractFileByPath(targetBeforeFolderMove)) {
+      throw new Error(`Meeting artifact already exists: ${targetBeforeFolderMove}`);
+    }
   }
 
   private async renameArtifactFile(currentPath: string, targetPath: string): Promise<void> {
@@ -342,6 +374,10 @@ export class MeetingNoteWriter {
 function isAlreadyExistsError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /already exists/i.test(message);
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatBullets(items: string[]): string {

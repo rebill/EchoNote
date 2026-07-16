@@ -450,6 +450,7 @@ TypeScript 契约文件：[plugin/src/llm/llm-types.ts](../plugin/src/llm/llm-ty
 
 `MeetingSummary` 必须包含：
 
+- `meetingTitle`
 - `summary`
 - `decisions`
 - `actionItems`
@@ -466,6 +467,7 @@ LLM 输出必须解析为 JSON：
 
 ```json
 {
+  "meetingTitle": "...",
   "summary": "...",
   "decisions": ["..."],
   "actionItems": ["..."],
@@ -477,8 +479,9 @@ LLM 输出必须解析为 JSON：
 总结写回规则：
 
 - 只更新 `Summary`、`Decisions`、`Action Items`、`Key Points`、`Open Questions`。
+- 同时将文件名和一级标题更新为 `YYYY-MM-DD_会议主题`。
 - 不覆盖 `Transcript`。
-- LLM 返回无法解析的 JSON 时，不写入会议笔记。
+- LLM 返回无法解析、缺少必需字段或字段类型错误的 JSON 时，不写入或重命名会议笔记。
 
 ## 9. 错误契约
 

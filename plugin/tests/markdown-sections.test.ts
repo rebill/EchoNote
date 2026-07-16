@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   extractTranscript,
+  isEchoNoteMeetingNote,
   replaceDocumentTitle,
   replaceMeetingEndTime,
   replaceTranscriptSection
@@ -62,4 +63,52 @@ Keep this section.
 
   assert.match(updated, /^# 2026-07-13_产品复盘$/m);
   assert.match(updated, /^## Summary$/m);
+});
+
+test("isEchoNoteMeetingNote accepts a default EchoNote meeting", () => {
+  assert.equal(isEchoNoteMeetingNote(`# Meeting
+
+- Platform: EchoNote
+- Tags: #meeting #echonote
+
+## Transcript
+`), true);
+});
+
+test("isEchoNoteMeetingNote accepts the stable meeting marker", () => {
+  assert.equal(isEchoNoteMeetingNote(`<!-- echonote-meeting -->
+# Custom meeting
+
+## Transcript
+`), true);
+});
+
+test("isEchoNoteMeetingNote rejects an unrelated note with a transcript heading", () => {
+  assert.equal(isEchoNoteMeetingNote(`# Research
+
+## Transcript
+
+Quoted interview text.
+`), false);
+});
+
+test("isEchoNoteMeetingNote ignores EchoNote markers inside the transcript", () => {
+  assert.equal(isEchoNoteMeetingNote(`# Research
+
+## Transcript
+
+Someone mentioned #echonote during the interview.
+`), false);
+});
+
+test("isEchoNoteMeetingNote accepts legacy templates with all summary sections", () => {
+  assert.equal(isEchoNoteMeetingNote(`# Meeting
+
+## Summary
+## Decisions
+## Action Items
+## Key Points
+## Open Questions
+## Transcript
+`), true);
 });

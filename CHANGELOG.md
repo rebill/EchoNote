@@ -4,6 +4,16 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.7.1] - 2026-07-16
+
+### Fixed
+
+- Reject incomplete or incorrectly typed meeting-summary JSON before changing a note.
+- Verify meeting-note markers before acting on an active Markdown file and fall back to the last tracked meeting.
+- Prevent concurrent summary requests and distinguish LLM response errors from note write failures.
+- Roll back the note rename when summary content cannot be written, and surface saved-artifact migration warnings.
+- Run plugin unit tests in CI and discover new test files automatically.
+
 ## [0.7.0] - 2026-07-13
 
 ### Changed
@@ -115,6 +125,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.7.1]: https://github.com/rebill/EchoNote/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rebill/EchoNote/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rebill/EchoNote/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rebill/EchoNote/compare/v0.4.0...v0.5.0

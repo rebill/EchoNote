@@ -1,4 +1,4 @@
-import { rmSync, mkdirSync } from "node:fs";
+import { rmSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
@@ -7,19 +7,14 @@ const outdir = join(process.cwd(), ".test-dist");
 rmSync(outdir, { recursive: true, force: true });
 mkdirSync(outdir, { recursive: true });
 
-const testFiles = [
-  "tests/asr-service-client.test.ts",
-  "tests/audio-chunker.test.ts",
-  "tests/companion-discovery.test.ts",
-  "tests/meeting-artifacts.test.ts",
-  "tests/meeting-title.test.ts",
-  "tests/markdown-sections.test.ts",
-  "tests/silence-detection.test.ts",
-  "tests/transcript-correction-service.test.ts",
-  "tests/transcript-markdown.test.ts",
-  "tests/transcript-corrections.test.ts",
-  "tests/summary-json.test.ts"
-];
+const testFiles = readdirSync(join(process.cwd(), "tests"), { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".test.ts"))
+  .map((entry) => `tests/${entry.name}`)
+  .sort();
+
+if (testFiles.length === 0) {
+  throw new Error("No plugin unit tests were found.");
+}
 
 for (const testFile of testFiles) {
   await build({

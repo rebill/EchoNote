@@ -130,7 +130,7 @@ M0 完成后，可以开启三条并行工作线：
 - Python ASR 服务源码和 `pyproject.toml` 位于 `asr-service/`。
 - ASR API 的请求和响应结构明确到字段级别。
 - `TranscriptSegment` 包含 `chunk_id`、`text`、`started_at_ms`、`ended_at_ms`、`model_id`。
-- `MeetingSummary` 至少包含 `summary`、`decisions`、`actionItems`、`keyPoints`、`openQuestions`。
+- `MeetingSummary` 至少包含 `meetingTitle`、`summary`、`decisions`、`actionItems`、`keyPoints`、`openQuestions`。
 - 后续 Milestone 不允许随意改动已冻结接口；如需改动，必须同步更新 PRD、技术设计和交付计划。
 
 ## 7. M1：Obsidian 插件骨架
