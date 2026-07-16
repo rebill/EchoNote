@@ -32,15 +32,18 @@ export class MeetingAudioSpool {
     return this.fileHandle ? "disk" : "memory";
   }
 
-  append(wavBytes: ArrayBuffer): Promise<void> {
+  append(wavBytes: ArrayBuffer, skipPcmBytes: number = 0): Promise<void> {
     if (this.disposed) {
       return Promise.reject(new Error("Meeting audio spool is disposed."));
+    }
+    if (!Number.isInteger(skipPcmBytes) || skipPcmBytes < 0 || skipPcmBytes % 2 !== 0) {
+      return Promise.reject(new Error("skipPcmBytes must be a non-negative even integer."));
     }
     const operation = this.writeChain.then(() => {
       if (this.writeError) {
         throw this.writeError;
       }
-      return this.appendInternal(wavBytes);
+      return this.appendInternal(wavBytes, skipPcmBytes);
     });
     this.writeChain = operation.catch((error) => {
       this.writeError ??= error;
@@ -98,19 +101,26 @@ export class MeetingAudioSpool {
     this.writeError = null;
   }
 
-  private async appendInternal(wavBytes: ArrayBuffer): Promise<void> {
+  private async appendInternal(wavBytes: ArrayBuffer, skipPcmBytes: number): Promise<void> {
     if (wavBytes.byteLength <= 44) {
       return;
     }
-    const payloadLength = wavBytes.byteLength - 44;
+    const availablePayloadBytes = wavBytes.byteLength - 44;
+    if (skipPcmBytes > availablePayloadBytes) {
+      throw new Error("skipPcmBytes exceeds the WAV PCM payload length.");
+    }
+    const payloadLength = availablePayloadBytes - skipPcmBytes;
+    if (payloadLength === 0) {
+      return;
+    }
     if (!this.fileHandle && this.totalPcmBytes + payloadLength <= this.memoryThresholdBytes) {
-      this.memoryChunks.push(wavBytes);
+      this.memoryChunks.push(skipPcmBytes === 0 ? wavBytes : trimPcm16WavStart(wavBytes, skipPcmBytes));
       this.totalPcmBytes += payloadLength;
       return;
     }
 
     await this.ensureDiskSpool();
-    await this.writePayload(new Uint8Array(wavBytes, 44));
+    await this.writePayload(new Uint8Array(wavBytes, 44 + skipPcmBytes));
     this.totalPcmBytes += payloadLength;
   }
 
@@ -147,4 +157,11 @@ export class MeetingAudioSpool {
       this.filePosition += bytesWritten;
     }
   }
+}
+
+function trimPcm16WavStart(wavBytes: ArrayBuffer, skipPcmBytes: number): ArrayBuffer {
+  const payloadLength = wavBytes.byteLength - 44 - skipPcmBytes;
+  const output = createPcm16WavBuffer(payloadLength);
+  new Uint8Array(output, 44).set(new Uint8Array(wavBytes, 44 + skipPcmBytes));
+  return output;
 }

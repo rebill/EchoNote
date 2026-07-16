@@ -36,6 +36,26 @@ class TrackingTranscriber:
 
 
 class ModelStateTest(unittest.IsolatedAsyncioTestCase):
+    async def test_load_warms_the_model_before_reporting_ready(self) -> None:
+        transcriber = WarmingTranscriber()
+        state = ModelState("test-model", backend="injected", transcriber=transcriber)
+
+        response = await state.load()
+
+        self.assertEqual(response["status"], "ready")
+        self.assertEqual(transcriber.events, ["load:test-model", "warmup:zh"])
+        await state.close()
+
+    async def test_warmup_failure_is_non_fatal_and_model_stays_available(self) -> None:
+        transcriber = FailingWarmupTranscriber()
+        state = ModelState("test-model", backend="injected", transcriber=transcriber)
+
+        with self.assertLogs("echonote_asr.model", level="WARNING"):
+            response = await state.load()
+
+        self.assertEqual(response["status"], "ready")
+        await state.close()
+
     async def test_transcription_is_serialized_and_reuses_a_clean_workspace(self) -> None:
         transcriber = TrackingTranscriber()
         with tempfile.TemporaryDirectory() as temp_root:
@@ -114,6 +134,23 @@ class FailingOnceTranscriber(TrackingTranscriber):
             self.should_fail = False
             raise RuntimeError("inference failed")
         return super().transcribe_wav(wav_path, language=language)
+
+
+class WarmingTranscriber(TrackingTranscriber):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[str] = []
+
+    def load(self, model_id: str) -> None:
+        self.events.append(f"load:{model_id}")
+
+    def warmup(self, *, language: str = "auto") -> None:
+        self.events.append(f"warmup:{language}")
+
+
+class FailingWarmupTranscriber(WarmingTranscriber):
+    def warmup(self, *, language: str = "auto") -> None:
+        raise RuntimeError("warmup failed")
 
 
 if __name__ == "__main__":

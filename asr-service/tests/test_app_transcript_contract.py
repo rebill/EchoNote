@@ -52,6 +52,12 @@ class TranscriptContractTest(unittest.TestCase):
         ):
             self.assertIsInstance(getattr(completion, field), float)
 
+    def test_model_preload_is_scheduled_during_application_startup(self) -> None:
+        app = create_app(default_model="preloaded-model", backend="fake", preload_model=True)
+
+        with TestClient(app):
+            self.assertIsNotNone(app.state.model_preload_task)
+
     def test_finalize_without_diarization_returns_no_speaker_turns(self) -> None:
         segment = {
             "chunk_id": "chunk-000001",

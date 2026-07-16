@@ -40,9 +40,10 @@ ThreadResult = TypeVar("ThreadResult")
 
 def create_app(
     default_model: str,
-    version: str = "0.8.0",
+    version: str = "0.8.1",
     backend: str = "fake",
     diarization_state: DiarizationState | None = None,
+    preload_model: bool | None = None,
 ) -> FastAPI:
     app = FastAPI(title="EchoNote ASR Service", version=version)
     app.add_middleware(
@@ -57,7 +58,22 @@ def create_app(
     app.state.model_state = model_state
     app.state.diarization_state = active_diarization_state
     app.state.diarization_gate = diarization_gate
-    app.router.add_event_handler("shutdown", model_state.close)
+    app.state.model_preload_task = None
+
+    should_preload_model = backend == "mlx-audio" if preload_model is None else preload_model
+
+    async def start_model_preload() -> None:
+        if should_preload_model:
+            app.state.model_preload_task = asyncio.create_task(model_state.load())
+
+    async def close_model_state() -> None:
+        preload_task = app.state.model_preload_task
+        if preload_task is not None:
+            await preload_task
+        await model_state.close()
+
+    app.router.add_event_handler("startup", start_model_preload)
+    app.router.add_event_handler("shutdown", close_model_state)
 
     @app.get("/health")
     async def health() -> dict[str, object]:

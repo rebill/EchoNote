@@ -4,6 +4,25 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.8.1] - 2026-07-16
+
+### Changed
+
+- MLX transcription now maps EchoNote's `zh` and `en` settings to Qwen3-ASR's `Chinese` and `English` language prompts while preserving model-side detection for `auto`.
+- The real ASR backend now preloads the configured model in the background when the service starts and runs a bounded warm-up inference before reporting the model as ready.
+- Continuous speech that reaches the forced 15-second chunk boundary now retains 500 ms of audio in the next ASR request to reduce clipped boundary words.
+
+### Fixed
+
+- Excluded retained overlap samples from complete meeting WAV assembly so saved audio and speaker diarization keep the original timeline.
+- Added conservative Chinese-character and English-word boundary deduplication for overlapping live transcript segments.
+- Kept overlapping live segment timestamps monotonic before speaker assignment and final transcript generation.
+
+### Verification
+
+- Added MLX language-hint and warm-up tests, startup preload coverage, forced-overlap tests, unique audio-spool tests, and bilingual transcript-boundary tests.
+- Verified a real cached Qwen3-ASR-0.6B-4bit run with a 0.854-second warm-up and 0.242-second hot Chinese transcription on the release machine.
+
 ## [0.8.0] - 2026-07-16
 
 ### Added
@@ -149,6 +168,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.8.1]: https://github.com/rebill/EchoNote/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rebill/EchoNote/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/rebill/EchoNote/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rebill/EchoNote/compare/v0.6.0...v0.7.0

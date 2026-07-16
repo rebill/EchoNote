@@ -44,3 +44,20 @@ test("MeetingAudioSpool rejects writes after disposal", async () => {
 
   await assert.rejects(() => spool.append(encodePcm16Wav(new Float32Array([0]))), /disposed/);
 });
+
+test("MeetingAudioSpool skips forced-cut overlap from complete meeting audio", async () => {
+  const spool = new MeetingAudioSpool(1024);
+  const first = encodePcm16Wav(new Float32Array([0.1, 0.2, 0.3]));
+  const second = encodePcm16Wav(new Float32Array([0.3, 0.4, 0.5]));
+
+  await spool.append(first);
+  await spool.append(second, 2);
+  const wav = await spool.toWav();
+
+  assert.equal(spool.pcmByteLength, 10);
+  assert.deepEqual(
+    [...new Uint8Array(wav ?? new ArrayBuffer(0), 44)],
+    [...new Uint8Array(first, 44), ...new Uint8Array(second, 46)]
+  );
+  await spool.dispose();
+});
