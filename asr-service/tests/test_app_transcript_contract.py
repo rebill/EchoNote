@@ -15,21 +15,22 @@ from echonote_asr.schemas import DiarizationStatus
 
 class TranscriptContractTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.client = TestClient(create_app(default_model="test-model", backend="fake"))
+        self.client = self.enterContext(TestClient(create_app(default_model="test-model", backend="fake")))
         response = self.client.post("/model/load", json={"model_id": "test-model"})
         self.assertEqual(response.status_code, 200)
 
     def test_transcribe_returns_text_and_turns(self) -> None:
-        response = self.client.post(
-            "/transcribe",
-            data={
-                "chunk_id": "chunk-000001",
-                "started_at_ms": "1000",
-                "ended_at_ms": "2500",
-                "language": "zh",
-            },
-            files={"audio": ("chunk.wav", create_silent_wav(1500), "audio/wav")},
-        )
+        with self.assertLogs("echonote_asr.app", level="INFO") as captured:
+            response = self.client.post(
+                "/transcribe",
+                data={
+                    "chunk_id": "chunk-000001",
+                    "started_at_ms": "1000",
+                    "ended_at_ms": "2500",
+                    "language": "zh",
+                },
+                files={"audio": ("chunk.wav", create_silent_wav(1500), "audio/wav")},
+            )
 
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
@@ -40,6 +41,16 @@ class TranscriptContractTest(unittest.TestCase):
         self.assertIsNone(body["turns"][0]["speaker"])
         self.assertEqual(body["turns"][0]["started_at_ms"], 1000)
         self.assertEqual(body["turns"][0]["ended_at_ms"], 2500)
+        completion = next(record for record in captured.records if record.getMessage() == "transcribe_completed")
+        for field in (
+            "_lock_wait_ms",
+            "_temp_write_ms",
+            "_inference_ms",
+            "_cleanup_ms",
+            "_response_serialize_ms",
+            "_request_total_ms",
+        ):
+            self.assertIsInstance(getattr(completion, field), float)
 
     def test_finalize_without_diarization_returns_no_speaker_turns(self) -> None:
         segment = {
@@ -116,7 +127,7 @@ class TranscriptContractTest(unittest.TestCase):
         self.assertIsNone(body["turns"][0]["speaker"])
 
     def test_finalize_with_available_diarization_returns_speaker_turns(self) -> None:
-        client = TestClient(
+        client = self.enterContext(TestClient(
             create_app(
                 default_model="test-model",
                 backend="fake",
@@ -127,7 +138,7 @@ class TranscriptContractTest(unittest.TestCase):
                     ]
                 ),
             )
-        )
+        ))
         response = client.post("/model/load", json={"model_id": "test-model"})
         self.assertEqual(response.status_code, 200)
         segments = [

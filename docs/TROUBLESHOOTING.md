@@ -234,3 +234,17 @@ Check:
 - The meeting note contains a non-empty `## Transcript` section.
 
 EchoNote does not write or rename the meeting note if the LLM response is invalid JSON, omits a required summary field, or returns a field with the wrong type.
+
+## Long meetings are slow to stop or finalize
+
+Run the local benchmarks first:
+
+```bash
+cd plugin && npm run benchmark:plugin
+cd ../asr-service && .venv/bin/python benchmarks/performance_benchmark.py
+```
+
+In `asr-service.log`, compare `lock_wait_ms`, `temp_write_ms`, `inference_ms`, and `cleanup_ms` on
+`transcribe_completed`. For speaker finalization, inspect `diarization_queue_wait_ms`, `diarization_ms`,
+`assignment_ms`, and `merge_ms` on `finalize_completed`. A high queue wait means another model operation is active;
+a high inference value is model/runtime work rather than plugin WAV assembly.

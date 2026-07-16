@@ -167,6 +167,9 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 
 `speaker` 在实时转录阶段通常为 `null`。
 
+v0.8.0 不改变响应 JSON。服务端结构化日志为每个请求增加 `lock_wait_ms`、`temp_write_ms`、
+`inference_ms`、`cleanup_ms`、`response_serialize_ms` 和 `request_total_ms`，用于区分排队、I/O 与模型耗时。
+
 ### `GET /diarization/status`
 
 响应：
@@ -232,6 +235,9 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 - `enable_diarization=false` 时返回 `diarization_status=disabled`，turns 的 `speaker` 可以为 `null`。
 - 未配置 Hugging Face token 或未安装 `pyannote.audio` 时返回 HTTP 200 和 `diarization_status=unavailable`。
 - diarization 运行失败时返回 HTTP 200 和 `diarization_status=failed`，不得返回空 transcript 覆盖实时稿。
+
+`finalize_completed` 日志包含 diarization queue wait、temporary write/cleanup、diarization、assignment、merge
+和 total 耗时；这些字段属于诊断日志，不属于 HTTP 响应契约。
 
 ### `POST /shutdown`
 

@@ -148,6 +148,19 @@ plugin/manifest.json
 plugin/styles.css
 ```
 
+## Performance Verification
+
+EchoNote v0.8.0 includes reproducible local benchmarks for long notes, transcript formatting, WAV assembly, ASR
+temporary I/O, and speaker assignment:
+
+```bash
+cd plugin && npm run benchmark:plugin
+cd ../asr-service && .venv/bin/python benchmarks/performance_benchmark.py
+```
+
+The recorded baseline and final comparison are in `docs/V0_8_0_PERFORMANCE_BASELINE.md`; stable budgets are in
+`docs/performance-budgets.json`.
+
 ## Install Plugin Into A Vault
 
 Replace the vault path with your test vault path:

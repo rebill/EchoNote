@@ -2,6 +2,7 @@ node_modules/
 dist/
 main.js
 .test-dist/
+.benchmark-dist/
 .venv/
 asr-service/.venv/
 target/

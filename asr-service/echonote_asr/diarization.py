@@ -99,7 +99,10 @@ class DiarizationState:
         try:
             with self._inference_lock:
                 wait_seconds = time.perf_counter() - waiting_started_at
+                pipeline_was_loaded = self._pipeline is not None
+                pipeline_load_started_at = time.perf_counter()
                 pipeline = self._load_pipeline()
+                pipeline_load_seconds = 0.0 if pipeline_was_loaded else time.perf_counter() - pipeline_load_started_at
                 inference_started_at = time.perf_counter()
                 logger.info(
                     "diarization_started",
@@ -109,6 +112,7 @@ class DiarizationState:
                         "_cpu_threads": self.cpu_threads,
                         "_segmentation_step": self.effective_segmentation_step,
                         "_queue_wait_seconds": round(wait_seconds, 3),
+                        "_model_load_seconds": round(pipeline_load_seconds, 3),
                     },
                 )
                 with limit_native_thread_pools(self.cpu_threads):
@@ -123,6 +127,8 @@ class DiarizationState:
                     "_cpu_threads": self.cpu_threads,
                     "_segmentation_step": self.effective_segmentation_step,
                     "_elapsed_seconds": round(elapsed_seconds, 3),
+                    "_queue_wait_seconds": round(wait_seconds, 3),
+                    "_model_load_seconds": round(pipeline_load_seconds, 3),
                     "_interval_count": len(intervals),
                 },
             )
@@ -456,12 +462,12 @@ def assign_speakers_to_turns(
     if not intervals:
         return turns, []
 
+    best_by_turn = best_speakers_for_turns(turns, intervals)
     labeler = SpeakerLabeler()
     assigned: list[TranscriptTurn] = []
     totals: dict[str, int] = {}
 
-    for turn in turns:
-        raw_speaker, ratio = best_speaker_for_turn(turn, intervals)
+    for turn, (raw_speaker, ratio) in zip(turns, best_by_turn, strict=True):
         speaker = labeler.label(raw_speaker) if raw_speaker is not None and ratio >= min_overlap_ratio else None
         if speaker is not None:
             totals[speaker] = totals.get(speaker, 0) + max(0, turn.ended_at_ms - turn.started_at_ms)
@@ -481,6 +487,68 @@ def assign_speakers_to_turns(
         for label in labeler.labels()
     ]
     return assigned, speakers
+
+
+def best_speakers_for_turns(
+    turns: list[TranscriptTurn],
+    intervals: list[SpeakerInterval],
+) -> list[tuple[str | None, float]]:
+    indexed_intervals = sorted(
+        enumerate(intervals),
+        key=lambda item: (item[1].started_at_ms, item[1].ended_at_ms, item[0]),
+    )
+    indexed_turns = sorted(
+        enumerate(turns),
+        key=lambda item: (item[1].started_at_ms, item[1].ended_at_ms, item[0]),
+    )
+    best_by_turn: list[tuple[str | None, float]] = [(None, 0.0)] * len(turns)
+    active: list[tuple[int, SpeakerInterval]] = []
+    interval_cursor = 0
+
+    for turn_index, turn in indexed_turns:
+        active = [item for item in active if item[1].ended_at_ms > turn.started_at_ms]
+        while (
+            interval_cursor < len(indexed_intervals)
+            and indexed_intervals[interval_cursor][1].started_at_ms < turn.ended_at_ms
+        ):
+            interval_index, interval = indexed_intervals[interval_cursor]
+            if interval.ended_at_ms > turn.started_at_ms:
+                active.append((interval_index, interval))
+            interval_cursor += 1
+
+        best_by_turn[turn_index] = best_speaker_for_turn_candidates(turn, active)
+
+    return best_by_turn
+
+
+def best_speaker_for_turn_candidates(
+    turn: TranscriptTurn,
+    candidates: list[tuple[int, SpeakerInterval]],
+) -> tuple[str | None, float]:
+    duration = max(1, turn.ended_at_ms - turn.started_at_ms)
+    overlaps: dict[str, int] = {}
+    first_interval_indexes: dict[str, int] = {}
+
+    for interval_index, interval in candidates:
+        if interval.started_at_ms >= turn.ended_at_ms:
+            continue
+        overlap = interval_overlap_ms(turn.started_at_ms, turn.ended_at_ms, interval.started_at_ms, interval.ended_at_ms)
+        if overlap <= 0:
+            continue
+        overlaps[interval.speaker] = overlaps.get(interval.speaker, 0) + overlap
+        first_interval_indexes[interval.speaker] = min(
+            interval_index,
+            first_interval_indexes.get(interval.speaker, interval_index),
+        )
+
+    if not overlaps:
+        return None, 0.0
+
+    speaker, overlap = max(
+        overlaps.items(),
+        key=lambda item: (item[1], -first_interval_indexes[item[0]]),
+    )
+    return speaker, min(1.0, overlap / duration)
 
 
 def best_speaker_for_turn(turn: TranscriptTurn, intervals: list[SpeakerInterval]) -> tuple[str | None, float]:

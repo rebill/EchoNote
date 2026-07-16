@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -76,19 +75,20 @@ class MlxAudioTranscriber:
         except ImportError as exc:
             raise RuntimeError("mlx-audio transcription module is unavailable") from exc
 
-        with tempfile.TemporaryDirectory(prefix="echonote-asr-") as tmp_dir:
-            output_path = str(Path(tmp_dir) / "transcript.txt")
+        output_file = Path(wav_path).with_suffix(".txt")
+        output_path = str(output_file)
+        try:
             transcription = self._call_generate_transcription(generate_transcription, wav_path, output_path)
 
             text = getattr(transcription, "text", None)
             if isinstance(text, str):
                 return text.strip()
 
-            output_file = Path(output_path)
             if output_file.exists():
                 return output_file.read_text(encoding="utf-8").strip()
-
-        return ""
+            return ""
+        finally:
+            output_file.unlink(missing_ok=True)
 
     def _call_generate_transcription(self, generate_transcription: object, wav_path: str, output_path: str) -> object:
         assert callable(generate_transcription)

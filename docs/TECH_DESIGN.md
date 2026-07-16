@@ -1086,3 +1086,13 @@ last 200 log lines
 - 0.6B 和 1.7B 在目标 Mac 上的加载时间、内存占用和单段转录耗时。
 - Obsidian 当前 Electron 版本下 Web Audio API 采集和 AudioWorklet 支持情况。
 - 是否需要为 ASR 服务提供独立虚拟环境创建脚本。
+
+## 22. v0.8.0 性能架构
+
+- Summary planner 在 turn、段落和句子边界切块，最多并发两个 partial 请求，并按输入顺序合并结果。
+- Meeting audio spool 在 32 MiB PCM 以内保留原始 chunk buffer，超过后串行写入权限为 `0600` 的临时 PCM 文件。
+- 停止会议时只组装一次完整 WAV，并复用于 Vault 保存和 speaker finalization。
+- 实时转录写入最多合并 250 ms，停止流程等待 ASR 队列和写入缓冲同时排空。
+- ASR 服务以独立 inference lock 串行模型加载与推理，复用单一工作目录，并在请求结束后删除输入文件。
+- Speaker assignment 对 turns 和 intervals 各排序一次，通过时间窗口只计算可能重叠的候选项，再按原始 turn 顺序生成标签。
+- 时间基准保留在发布报告中；CI 使用内容等价、并发上限、清理行为和 overlap-check 次数作为稳定门禁。

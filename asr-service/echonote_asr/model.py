@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import tempfile
 from pathlib import Path
+import time
 
 from .schemas import ModelLifecycleStatus, ModelLoadResponse, ModelStatusResponse
 from .transcriber import Transcriber, create_transcriber
@@ -12,14 +13,35 @@ from .transcriber import Transcriber, create_transcriber
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class TranscriptionResult:
+    text: str
+    lock_wait_ms: float
+    temp_write_ms: float
+    inference_ms: float
+    cleanup_ms: float
+    total_ms: float
+
+
 class ModelState:
-    def __init__(self, model_id: str, backend: str = "fake") -> None:
+    def __init__(
+        self,
+        model_id: str,
+        backend: str = "fake",
+        *,
+        transcriber: Transcriber | None = None,
+        temp_root: str | Path | None = None,
+    ) -> None:
         self._model_id = model_id
         self._backend = backend
         self._status = ModelLifecycleStatus.NOT_LOADED
         self._error: str | None = None
         self._lock = asyncio.Lock()
-        self._transcriber: Transcriber = create_transcriber(backend)
+        self._inference_lock = asyncio.Lock()
+        self._transcriber: Transcriber = transcriber or create_transcriber(backend)
+        self._workspace = tempfile.TemporaryDirectory(prefix="echonote-asr-", dir=temp_root)
+        self._wav_path = Path(self._workspace.name) / "chunk.wav"
+        self._closed = False
 
     @property
     def model_id(self) -> str:
@@ -57,7 +79,8 @@ class ModelState:
             )
 
         try:
-            await asyncio.to_thread(self._transcriber.load, active_model_id)
+            async with self._inference_lock:
+                await run_thread_to_completion(self._transcriber.load, active_model_id)
             if self._backend == "fake":
                 await asyncio.sleep(0.5)
         except Exception as exc:
@@ -78,16 +101,104 @@ class ModelState:
             )
             return asdict(ModelLoadResponse(model_id=self._model_id, status=self._status))
 
-    async def transcribe_wav_bytes(self, wav_bytes: bytes, *, chunk_id: str, language: str = "auto") -> str:
-        async with self._lock:
-            if self._status != ModelLifecycleStatus.READY:
-                raise RuntimeError(f"model is {self._status}")
+    async def transcribe_wav_bytes(
+        self,
+        wav_bytes: bytes,
+        *,
+        chunk_id: str,
+        language: str = "auto",
+    ) -> TranscriptionResult:
+        total_started_at = time.perf_counter()
+        lock_started_at = time.perf_counter()
+        async with self._inference_lock:
+            lock_wait_ms = elapsed_ms(lock_started_at)
+            async with self._lock:
+                if self._status != ModelLifecycleStatus.READY:
+                    raise RuntimeError(f"model is {self._status}")
+                if self._closed:
+                    raise RuntimeError("model state is closed")
 
-        with tempfile.TemporaryDirectory(prefix="echonote-asr-chunk-") as tmp_dir:
-            wav_path = Path(tmp_dir) / f"{chunk_id}.wav"
-            wav_path.write_bytes(wav_bytes)
-            return await asyncio.to_thread(
-                self._transcriber.transcribe_wav,
-                str(wav_path),
-                language=language,
+            text = ""
+            temp_write_ms = 0.0
+            inference_ms = 0.0
+            cleanup_ms = 0.0
+            failure: Exception | None = None
+            try:
+                write_started_at = time.perf_counter()
+                await asyncio.to_thread(self._wav_path.write_bytes, wav_bytes)
+                temp_write_ms = elapsed_ms(write_started_at)
+                inference_started_at = time.perf_counter()
+                text = await run_thread_to_completion(
+                    self._transcriber.transcribe_wav,
+                    str(self._wav_path),
+                    language=language,
+                )
+                inference_ms = elapsed_ms(inference_started_at)
+            except Exception as exc:
+                failure = exc
+                if temp_write_ms > 0:
+                    inference_ms = inference_ms or elapsed_ms(inference_started_at)
+            finally:
+                cleanup_started_at = time.perf_counter()
+                await asyncio.to_thread(self._wav_path.unlink, missing_ok=True)
+                cleanup_ms = elapsed_ms(cleanup_started_at)
+
+            if failure is not None:
+                logger.error(
+                    "transcribe_inference_failed",
+                    extra={
+                        "_chunk_id": chunk_id,
+                        "_lock_wait_ms": round(lock_wait_ms, 3),
+                        "_temp_write_ms": round(temp_write_ms, 3),
+                        "_inference_ms": round(inference_ms, 3),
+                        "_cleanup_ms": round(cleanup_ms, 3),
+                        "_total_ms": round(elapsed_ms(total_started_at), 3),
+                        "_error": str(failure),
+                    },
+                )
+                raise failure
+
+            result = TranscriptionResult(
+                text=text,
+                lock_wait_ms=round(lock_wait_ms, 3),
+                temp_write_ms=round(temp_write_ms, 3),
+                inference_ms=round(inference_ms, 3),
+                cleanup_ms=round(cleanup_ms, 3),
+                total_ms=round(elapsed_ms(total_started_at), 3),
             )
+            logger.info(
+                "transcribe_inference_completed",
+                extra={
+                    "_chunk_id": chunk_id,
+                    "_lock_wait_ms": result.lock_wait_ms,
+                    "_temp_write_ms": result.temp_write_ms,
+                    "_inference_ms": result.inference_ms,
+                    "_cleanup_ms": result.cleanup_ms,
+                    "_total_ms": result.total_ms,
+                },
+            )
+            return result
+
+    async def close(self) -> None:
+        async with self._inference_lock:
+            if self._closed:
+                return
+            self._closed = True
+            await asyncio.to_thread(self._workspace.cleanup)
+
+
+async def run_thread_to_completion(function: object, *args: object, **kwargs: object) -> object:
+    assert callable(function)
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except Exception:
+            pass
+        raise
+
+
+def elapsed_ms(started_at: float) -> float:
+    return (time.perf_counter() - started_at) * 1_000

@@ -1,11 +1,12 @@
 {
   "name": "echonote-obsidian-plugin",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-unit-tests.mjs",
+    "benchmark:plugin": "node scripts/run-performance-benchmarks.mjs",
     "verify:release-metadata": "node scripts/check-release-metadata.mjs",
     "build": "esbuild src/main.ts --bundle --external:obsidian --format=cjs --platform=node --target=es2018 --outfile=main.js",
     "package": "npm run verify:release-metadata && npm run build && node scripts/package.mjs"

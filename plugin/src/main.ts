@@ -279,6 +279,11 @@ export default class EchoNotePlugin extends Plugin {
       }
 
       new Notice("EchoNote: generating meeting summary...");
+      this.statusStore.setState({
+        summaryGeneration: "running",
+        summaryGenerationMessage: "Reading the meeting transcript.",
+        lastError: null
+      });
       let transcript: string;
       try {
         transcript = await this.noteWriter.readTranscript(file);
@@ -287,13 +292,23 @@ export default class EchoNotePlugin extends Plugin {
         return;
       }
       if (!transcript.trim()) {
+        this.statusStore.setState({
+          summaryGeneration: "failed",
+          summaryGenerationMessage: "The meeting transcript is empty."
+        });
         new Notice("EchoNote transcript is empty. The meeting note was not changed.");
         return;
       }
 
       let summary: MeetingSummary;
       try {
-        summary = await this.summaryService.summarize(transcript, this.settings);
+        summary = await this.summaryService.summarize(transcript, this.settings, (progress) => {
+          const label = progress.stage === "partial" ? "partial summaries" : "summary merge groups";
+          this.statusStore.setState({
+            summaryGeneration: "running",
+            summaryGenerationMessage: `Completed ${progress.completed} of ${progress.total} ${label}.`
+          });
+        });
       } catch (error) {
         const code = error instanceof MeetingSummaryParseError
           ? "LLM_RESPONSE_PARSE_FAILED"
@@ -317,6 +332,8 @@ export default class EchoNotePlugin extends Plugin {
       this.statusStore.setState({
         currentMeetingPath: summarizedFile.path,
         currentMeetingTitle: summarizedFile.basename,
+        summaryGeneration: "succeeded",
+        summaryGenerationMessage: `Summary written to ${summarizedFile.basename}.`,
         lastError: null
       });
       new Notice(`EchoNote summary written: ${summarizedFile.basename}`);
@@ -537,6 +554,8 @@ export default class EchoNotePlugin extends Plugin {
   private reportSummaryFailure(code: EchoNoteErrorCode, message: string, error: unknown): void {
     const detail = error instanceof Error ? error.message : String(error);
     this.statusStore.setState({
+      summaryGeneration: "failed",
+      summaryGenerationMessage: `${message} ${detail}`,
       lastError: createEchoNoteError(code, message, { detail, recoverable: true })
     });
     new Notice(`EchoNote summary failed: ${detail}`);

@@ -1,12 +1,12 @@
 import { Notice, Platform, TFile } from "obsidian";
 import { AudioRecorder } from "../audio/audio-recorder";
+import { MeetingAudioSpool } from "../audio/meeting-audio-spool";
 import type { AudioChunk } from "../audio/audio-types";
 import {
   autoStopSilenceThresholdMs,
   isSilentAudioChunk,
   nextConsecutiveSilenceMs
 } from "../audio/silence-detection";
-import { concatWavFiles } from "../audio/wav-encoder";
 import { AsrRuntimeResolutionError, resolveAsrRuntime } from "../asr/asr-runtime-resolver";
 import { AsrServiceClient } from "../asr/asr-service-client";
 import type { TranscriptTurn } from "../asr/asr-types";
@@ -15,9 +15,11 @@ import { createAsrRuntimeStatus, createCompanionResolutionStatus } from "../stat
 import type { StatusStore } from "../status/status-store";
 import { createEchoNoteError } from "../utils/errors";
 import { getMeetingArtifactPaths, getMeetingAudioFolder, sanitizeMeetingId } from "./meeting-artifacts";
+import { CoalescingBatchWriter } from "./coalescing-batch-writer";
 import { MeetingNoteWriter } from "./meeting-note-writer";
 
 const MIN_TRANSCRIBE_CHUNK_MS = 1000;
+const TRANSCRIPT_APPEND_DELAY_MS = 250;
 
 type MeetingSessionControllerOptions = {
   getSettings: () => EchoNoteSettings;
@@ -40,22 +42,37 @@ type FinalizeTranscriptSnapshot = {
   correctionRules: string;
 };
 
+type PendingTranscriptAppend = {
+  file: TFile;
+  segment: LiveTranscriptSegment;
+  enableTimestamps: boolean;
+  correctionRules: string;
+};
+
 export class MeetingSessionController {
   private meetingFile: TFile | null = null;
   private meetingTitle: string | null = null;
   private meetingAudioFolder: string | null = null;
   private savedMeetingAudioPath: string | null = null;
-  private meetingAudioChunks: ArrayBuffer[] = [];
+  private meetingAudio = new MeetingAudioSpool();
   private liveSegments: LiveTranscriptSegment[] = [];
   private queue: AudioChunk[] = [];
   private processing = false;
+  private queueDrainWaiters: Array<() => void> = [];
   private starting = false;
   private started = false;
   private stopping = false;
   private asrClient: AsrServiceClient | null = null;
   private consecutiveSilenceMs = 0;
+  private readonly transcriptAppendBuffer: CoalescingBatchWriter<PendingTranscriptAppend>;
 
-  constructor(private readonly options: MeetingSessionControllerOptions) {}
+  constructor(private readonly options: MeetingSessionControllerOptions) {
+    this.transcriptAppendBuffer = new CoalescingBatchWriter(
+      TRANSCRIPT_APPEND_DELAY_MS,
+      (items) => this.writeTranscriptBatch(items),
+      (error) => this.handleTranscriptWriteFailure(error)
+    );
+  }
 
   async requestMicrophonePermission(): Promise<void> {
     try {
@@ -122,7 +139,8 @@ export class MeetingSessionController {
       this.meetingTitle = meetingInfo.title;
       this.meetingAudioFolder = meetingInfo.audioFolder;
       this.savedMeetingAudioPath = null;
-      this.meetingAudioChunks = [];
+      await this.meetingAudio.dispose();
+      this.meetingAudio = new MeetingAudioSpool();
       this.liveSegments = [];
       this.consecutiveSilenceMs = 0;
 
@@ -134,7 +152,7 @@ export class MeetingSessionController {
 
       new Notice("EchoNote: requesting microphone...");
       await this.options.audioRecorder.start(settings.chunkLengthSeconds, settings.audioInputDeviceId, (chunk) => {
-        void this.enqueueChunk(chunk);
+        void this.enqueueChunk(chunk).catch((error) => this.handleAudioSpoolFailure(error));
       });
 
       this.started = true;
@@ -142,6 +160,8 @@ export class MeetingSessionController {
       new Notice("EchoNote meeting started.");
     } catch (error) {
       await this.options.audioRecorder.stop();
+      await this.meetingAudio.dispose();
+      this.meetingAudio = new MeetingAudioSpool();
       this.started = false;
       this.asrClient = null;
       this.options.statusStore.setState({
@@ -225,20 +245,23 @@ export class MeetingSessionController {
         await this.enqueueChunk(finalChunk);
       }
 
-      await this.saveCompleteAudioIfEnabled();
       await this.waitForQueueToDrain();
+      await this.transcriptAppendBuffer.drain();
+      const completeWavBytes = await this.assembleCompleteMeetingAudioIfNeeded();
+      await this.saveCompleteAudioIfEnabled(completeWavBytes);
       await this.saveTranscriptSegmentsIfAudioSaved();
       if (this.meetingFile) {
         await this.options.noteWriter.updateMeetingEndTime(this.meetingFile, stoppedAt);
       }
-      const finalizeSnapshot = this.createFinalizeSnapshot();
+      const finalizeSnapshot = this.createFinalizeSnapshot(completeWavBytes);
+      await this.meetingAudio.dispose();
+      this.meetingAudio = new MeetingAudioSpool();
       this.started = false;
       this.meetingFile = null;
       this.meetingTitle = null;
       this.meetingAudioFolder = null;
       this.savedMeetingAudioPath = null;
       this.asrClient = null;
-      this.meetingAudioChunks = [];
       this.liveSegments = [];
       this.consecutiveSilenceMs = 0;
       this.queue = [];
@@ -331,11 +354,12 @@ export class MeetingSessionController {
   }
 
   private async enqueueChunk(chunk: AudioChunk): Promise<void> {
-    this.meetingAudioChunks.push(chunk.wavBytes);
+    const audioWrite = this.meetingAudio.append(chunk.wavBytes);
     const shouldStopAfterSilence = this.recordSilenceAndShouldAutoStop(chunk);
 
     if (this.shouldSkipTranscription(chunk)) {
       this.options.statusStore.setState({ pendingChunkCount: this.queue.length });
+      await audioWrite;
       if (shouldStopAfterSilence) {
         this.stopAfterSilence();
       }
@@ -345,6 +369,7 @@ export class MeetingSessionController {
     this.queue.push(chunk);
     this.options.statusStore.setState({ pendingChunkCount: this.queue.length });
     void this.processQueue();
+    await audioWrite;
   }
 
   private shouldSkipTranscription(chunk: AudioChunk): boolean {
@@ -385,6 +410,7 @@ export class MeetingSessionController {
       }
     } finally {
       this.processing = false;
+      this.resolveQueueDrainWaiters();
     }
   }
 
@@ -404,13 +430,12 @@ export class MeetingSessionController {
     try {
       const segment = await client.transcribe(chunk, settings.summaryLanguage === "en" ? "en" : "zh");
       this.liveSegments.push(segment);
-      await this.options.noteWriter.appendTranscript(
-        meetingFile,
+      this.transcriptAppendBuffer.enqueue({
+        file: meetingFile,
         segment,
-        settings.enableTimestamps,
-        settings.transcriptCorrectionRules
-      );
-      this.options.statusStore.setState({ lastTranscriptAt: Date.now(), lastError: null });
+        enableTimestamps: settings.enableTimestamps,
+        correctionRules: settings.transcriptCorrectionRules
+      });
     } catch (error) {
       this.options.statusStore.setState({
         lastError: createEchoNoteError("ASR_TRANSCRIBE_FAILED", `Failed to transcribe ${chunk.id}.`, {
@@ -422,15 +447,37 @@ export class MeetingSessionController {
   }
 
   private async waitForQueueToDrain(): Promise<void> {
-    while (this.processing || this.queue.length > 0) {
-      await sleep(200);
+    if (!this.processing && this.queue.length === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => this.queueDrainWaiters.push(resolve));
+  }
+
+  private resolveQueueDrainWaiters(): void {
+    if (this.processing || this.queue.length > 0) {
+      return;
+    }
+    const waiters = this.queueDrainWaiters.splice(0);
+    for (const resolve of waiters) {
+      resolve();
     }
   }
 
-  private createFinalizeSnapshot(): FinalizeTranscriptSnapshot | null {
+  private async assembleCompleteMeetingAudioIfNeeded(): Promise<ArrayBuffer | null> {
+    const settings = this.options.getSettings();
+    const shouldFinalize = Boolean(
+      this.asrClient && this.meetingFile && this.liveSegments.length > 0 && this.meetingAudio.pcmByteLength > 0
+    );
+    if ((!settings.saveRawAudio && !shouldFinalize) || this.meetingAudio.pcmByteLength === 0) {
+      return null;
+    }
+    return this.meetingAudio.toWav();
+  }
+
+  private createFinalizeSnapshot(wavBytes: ArrayBuffer | null): FinalizeTranscriptSnapshot | null {
     const client = this.asrClient;
     const meetingFile = this.meetingFile;
-    if (!client || !meetingFile || this.liveSegments.length === 0 || this.meetingAudioChunks.length === 0) {
+    if (!client || !meetingFile || this.liveSegments.length === 0 || !wavBytes) {
       return null;
     }
 
@@ -439,7 +486,7 @@ export class MeetingSessionController {
       client,
       meetingFile,
       meetingId: sanitizeMeetingId(this.meetingTitle ?? meetingFile.basename),
-      wavBytes: concatWavFiles(this.meetingAudioChunks),
+      wavBytes,
       liveSegments: [...this.liveSegments],
       language: settings.summaryLanguage === "en" ? "en" : "zh",
       enableTimestamps: settings.enableTimestamps,
@@ -519,15 +566,14 @@ export class MeetingSessionController {
     }
   }
 
-  private async saveCompleteAudioIfEnabled(): Promise<void> {
+  private async saveCompleteAudioIfEnabled(wavBytes: ArrayBuffer | null): Promise<void> {
     const settings = this.options.getSettings();
-    if (!settings.saveRawAudio || this.meetingAudioChunks.length === 0) {
+    if (!settings.saveRawAudio || !wavBytes) {
       return;
     }
 
     const meetingTitle = this.meetingTitle ?? "meeting";
     const audioFolder = this.meetingAudioFolder ?? `${settings.audioSaveFolder}/${meetingTitle}`;
-    const wavBytes = concatWavFiles(this.meetingAudioChunks);
     this.savedMeetingAudioPath = await this.options.noteWriter.saveMeetingAudio(audioFolder, meetingTitle, wavBytes);
   }
 
@@ -547,6 +593,50 @@ export class MeetingSessionController {
       });
       new Notice("EchoNote failed to save transcript segments. Speaker retry from saved audio will be unavailable.");
     }
+  }
+
+  private async writeTranscriptBatch(items: PendingTranscriptAppend[]): Promise<void> {
+    let start = 0;
+    while (start < items.length) {
+      const first = items[start];
+      let end = start + 1;
+      while (
+        end < items.length
+        && items[end].file === first.file
+        && items[end].enableTimestamps === first.enableTimestamps
+        && items[end].correctionRules === first.correctionRules
+      ) {
+        end += 1;
+      }
+      await this.options.noteWriter.appendTranscriptSegments(
+        first.file,
+        items.slice(start, end).map((item) => item.segment),
+        first.enableTimestamps,
+        first.correctionRules
+      );
+      start = end;
+    }
+    this.options.statusStore.setState({ lastTranscriptAt: Date.now(), lastError: null });
+  }
+
+  private handleTranscriptWriteFailure(error: unknown): void {
+    this.options.statusStore.setState({
+      lastError: createEchoNoteError("NOTE_WRITE_FAILED", "Failed to append live transcript.", {
+        detail: error instanceof Error ? error.message : String(error),
+        recoverable: true
+      })
+    });
+  }
+
+  private handleAudioSpoolFailure(error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    this.options.statusStore.setState({
+      lastError: createEchoNoteError("NOTE_WRITE_FAILED", "Failed to buffer meeting audio.", {
+        detail,
+        recoverable: true
+      })
+    });
+    new Notice(`EchoNote failed to buffer meeting audio: ${detail}`);
   }
 
   private createClient(baseUrl: string): AsrServiceClient {

@@ -1,26 +1,11 @@
 const PCM_MAX = 0x7fff;
 const PCM_MIN = -0x8000;
 
-export function encodePcm16Wav(samples: Float32Array, sampleRate: 16000 = 16000): ArrayBuffer {
+export function encodePcm16Wav(samples: Float32Array, sampleRate: number = 16000): ArrayBuffer {
   const bytesPerSample = 2;
-  const channelCount = 1;
   const dataByteLength = samples.length * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + dataByteLength);
+  const buffer = createPcm16WavBuffer(dataByteLength, sampleRate);
   const view = new DataView(buffer);
-
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataByteLength, true);
-  writeAscii(view, 8, "WAVE");
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channelCount, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channelCount * bytesPerSample, true);
-  view.setUint16(32, channelCount * bytesPerSample, true);
-  view.setUint16(34, 16, true);
-  writeAscii(view, 36, "data");
-  view.setUint32(40, dataByteLength, true);
 
   let offset = 44;
   for (const sample of samples) {
@@ -33,26 +18,40 @@ export function encodePcm16Wav(samples: Float32Array, sampleRate: 16000 = 16000)
   return buffer;
 }
 
-export function concatWavFiles(wavFiles: ArrayBuffer[], sampleRate: 16000 = 16000): ArrayBuffer {
-  const samples: Int16Array[] = [];
-  let totalSamples = 0;
+export function concatWavFiles(wavFiles: ArrayBuffer[], sampleRate: number = 16000): ArrayBuffer {
+  const payloads: Uint8Array[] = [];
+  let dataByteLength = 0;
 
   for (const wavFile of wavFiles) {
     if (wavFile.byteLength <= 44) {
       continue;
     }
 
-    const pcmBytes = wavFile.slice(44);
-    const pcm = new Int16Array(pcmBytes);
-    samples.push(pcm);
-    totalSamples += pcm.length;
+    const payload = new Uint8Array(wavFile, 44);
+    payloads.push(payload);
+    dataByteLength += payload.byteLength;
+  }
+
+  const buffer = createPcm16WavBuffer(dataByteLength, sampleRate);
+
+  const output = new Uint8Array(buffer);
+  let offset = 44;
+  for (const payload of payloads) {
+    output.set(payload, offset);
+    offset += payload.byteLength;
+  }
+
+  return buffer;
+}
+
+export function createPcm16WavBuffer(dataByteLength: number, sampleRate: number = 16000): ArrayBuffer {
+  if (!Number.isInteger(dataByteLength) || dataByteLength < 0 || dataByteLength % 2 !== 0) {
+    throw new Error("PCM16 data byte length must be a non-negative even integer.");
   }
 
   const bytesPerSample = 2;
-  const dataByteLength = totalSamples * bytesPerSample;
   const buffer = new ArrayBuffer(44 + dataByteLength);
   const view = new DataView(buffer);
-
   writeAscii(view, 0, "RIFF");
   view.setUint32(4, 36 + dataByteLength, true);
   writeAscii(view, 8, "WAVE");
@@ -66,15 +65,6 @@ export function concatWavFiles(wavFiles: ArrayBuffer[], sampleRate: 16000 = 1600
   view.setUint16(34, 16, true);
   writeAscii(view, 36, "data");
   view.setUint32(40, dataByteLength, true);
-
-  let offset = 44;
-  for (const pcm of samples) {
-    for (const sample of pcm) {
-      view.setInt16(offset, sample, true);
-      offset += bytesPerSample;
-    }
-  }
-
   return buffer;
 }
 

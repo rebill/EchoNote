@@ -92,6 +92,13 @@ function findRepeatedRun(text: string, index: number): { unitLength: number; rep
   const maxUnitLength = Math.min(MAX_REPEATED_UNIT_CHARS, Math.floor(remaining / MIN_REPETITIONS));
 
   for (let unitLength = MIN_REPEATED_UNIT_CHARS; unitLength <= maxUnitLength; unitLength += 1) {
+    if (
+      text[index] !== text[index + unitLength]
+      || text[index] !== text[index + (unitLength * 2)]
+      || text[index] !== text[index + (unitLength * 3)]
+    ) {
+      continue;
+    }
     const unit = text.slice(index, index + unitLength);
     if (!unit.trim()) {
       continue;

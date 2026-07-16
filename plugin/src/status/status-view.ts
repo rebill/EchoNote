@@ -85,6 +85,11 @@ export class EchoNoteStatusView extends ItemView {
         label: "Correction",
         value: status.transcriptCorrection,
         tone: this.statusTone(status.transcriptCorrection)
+      },
+      {
+        label: "Summary",
+        value: status.summaryGeneration,
+        tone: this.statusTone(status.summaryGeneration)
       }
     ];
     const summaryEl = container.createDiv({ cls: "echonote-status-summary" });
@@ -138,7 +143,14 @@ export class EchoNoteStatusView extends ItemView {
             tone: this.statusTone(status.transcriptCorrection),
             variant: "badge"
           },
-          { label: "Correction Detail", value: status.transcriptCorrectionMessage ?? "None" }
+          { label: "Correction Detail", value: status.transcriptCorrectionMessage ?? "None" },
+          {
+            label: "Summary Generation",
+            value: status.summaryGeneration,
+            tone: this.statusTone(status.summaryGeneration),
+            variant: "badge"
+          },
+          { label: "Summary Detail", value: status.summaryGenerationMessage ?? "None" }
         ]
       }
     ];

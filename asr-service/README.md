@@ -48,6 +48,15 @@ CLI options:
 
 Logs are emitted as JSON lines.
 
+## ASR Scheduling And Timings
+
+Model inference is serialized and uses one bounded temporary workspace per service process. Each input WAV is removed
+after inference, including failed requests, and the workspace is removed on service shutdown. JSON logs include
+`lock_wait_ms`, `temp_write_ms`, `inference_ms`, `cleanup_ms`, and `response_serialize_ms` for transcription.
+Finalization logs include diarization queue wait, model load, inference, assignment, merge, and cleanup durations.
+
+Run `.venv/bin/python benchmarks/performance_benchmark.py` for the ASR and speaker-assignment benchmarks.
+
 ## Speaker Diarization Performance
 
 Speaker diarization is serialized so retries cannot run multiple pyannote pipelines at the same time. On CPU,
