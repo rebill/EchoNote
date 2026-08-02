@@ -1,6 +1,6 @@
 # EchoNote
 
-EchoNote is an Obsidian desktop plugin for local meeting transcription and AI meeting summaries.
+EchoNote is an Obsidian desktop plugin for offline meeting transcription and optional AI meeting summaries.
 
 MVP scope:
 
@@ -34,53 +34,34 @@ docs/         PRD, technical design, test plans, and user guides
 - Rust and Tauri prerequisites if building Companion from source.
 - Optional: BlackHole or Loopback if you want to record meeting software output.
 
-## Install ASR Service
+## Offline Runtime and Installation
 
-From the repository root:
+EchoNote v0.9.0 runs ASR and speaker diarization from local model directories and installs Python dependencies only from a verified offline wheelhouse. A Hugging Face token is not used at runtime or during installation.
 
-```bash
-cd /Users/br/Git/github/rebill/EchoNote
-
-python3 -m venv asr-service/.venv
-source asr-service/.venv/bin/activate
-
-pip install --upgrade pip
-pip install -e 'asr-service[mlx,diarization]'
-```
-
-Verify real ASR:
+Python 3.11+ is still a prerequisite. Build the portable bundle once on an authorized connected Mac, then move the resulting directory to the offline Mac:
 
 ```bash
-python -m echonote_asr.spike_real_asr \
-  --audio /tmp/echonote-test.wav \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
-  --language zh
+python3 scripts/build_offline_bundle.py \
+  --output offline-bundle \
+  --wheelhouse /path/to/wheelhouse \
+  --requirements /path/to/requirements-offline.txt \
+  --asr-model qwen3-0.6b-4bit=/path/to/Qwen3-ASR-0.6B-4bit \
+  --diarization-model /path/to/speaker-diarization-community-1
 ```
 
-## Run ASR Service
+The bundle contains a platform/Python contract and SHA-256 for every wheel, requirement file, and model file. Companion verifies the complete manifest before mutation, installs dependencies with `pip --no-index --find-links`, and atomically activates model directories with rollback.
 
-For fake ASR testing:
+Set `Offline bundle path` in Companion, then click `Set Up EchoNote`. See [Offline installation](docs/V0_9_0_OFFLINE_INSTALLATION.md) for bundle creation, transfer, validation, and limitations.
+
+To start the service manually, pass absolute local model paths:
 
 ```bash
 source asr-service/.venv/bin/activate
 
-python -m echonote_asr \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m echonote_asr \
   --host 127.0.0.1 \
   --port 8765 \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
-  --backend fake \
-  --log-level info
-```
-
-For real local ASR:
-
-```bash
-source asr-service/.venv/bin/activate
-
-python -m echonote_asr \
-  --host 127.0.0.1 \
-  --port 8765 \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
+  --model "/absolute/path/to/Qwen3-ASR-0.6B-4bit" \
   --backend mlx-audio \
   --log-level info
 ```
@@ -99,7 +80,7 @@ If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explici
 
 ## Run With EchoNote Desktop
 
-EchoNote desktop is a macOS Tauri app that manages the existing Python ASR service. It does not bundle Python or model weights in the MVP. The desktop app is source-only; no signed `.app` or `.dmg` is published for this release.
+EchoNote desktop is a macOS Tauri app that manages the Python ASR service and verified offline bundle. Python itself is not bundled in v0.9.0.
 
 Expected workflow:
 
@@ -113,9 +94,9 @@ npm run tauri:dev
 
 2. Open EchoNote.
 3. Click `Set Up EchoNote`.
-4. Wait for the setup steps to find Python, prepare `asr-service/.venv`, install fake-backend-safe dependencies, and start the local service.
-5. Use `Advanced Settings` only for custom Python paths, ports, backend, or model IDs.
-6. Optional: configure a Hugging Face token for local speaker diarization with `pyannote/speaker-diarization-community-1`.
+4. Set the offline bundle path if it is not at `~/Library/Application Support/EchoNote/offline-bundle`.
+5. Wait for setup to verify hashes, prepare `asr-service/.venv`, install from the wheelhouse, atomically install models, and start the local service.
+6. Use `Advanced Settings` only for custom Python paths, ports, or local model paths.
 7. Confirm EchoNote shows `Service: Running` and writes discovery to:
 
 ```text

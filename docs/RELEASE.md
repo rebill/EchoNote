@@ -39,7 +39,7 @@ cd asr-service
 .venv/bin/python -m unittest discover -s tests
 ```
 
-When the Hugging Face token and cached community-1 model are available, also run the real diarization smoke test from the repository root:
+When authorized local Qwen3 and community-1 model snapshots are available, run ASR and diarization with tokens removed, offline environment variables forced, and network access blocked or proxied to an unreachable endpoint.
 
 ```bash
 asr-service/.venv/bin/python scripts/v0_4_0_real_diarization_smoke.py
@@ -63,7 +63,7 @@ node scripts/v0_2_0_fake_backend_smoke.mjs
 
 This verifies the setup API fallback contract, ASR fake backend health/model/transcription, desktop discovery shape, Companion-only plugin runtime resolution, and legacy Manual settings migration away from plugin-managed ASR.
 
-Companion is source-only. Record that decision in the release notes and skip attaching `.app` or `.dmg` artifacts unless a signed and verified binary is produced in a later release.
+For v0.9.0, verify that the `.app` contains `Contents/Resources/asr-service`. Do not distribute an unsigned build as a trusted public artifact; signing, notarization, Gatekeeper verification, and model redistribution rights remain release gates.
 
 ## 3. Package
 

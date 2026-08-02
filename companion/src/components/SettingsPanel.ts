@@ -32,10 +32,18 @@ export function createSettingsPanel(
       ["qwen3-1.7b-4bit", "Qwen3 ASR 1.7B 4-bit"],
       ["custom", "Custom model"]
     ]),
-    createTextField("Custom model ID", "customModelId", response.settings.customModelId),
+    createCheckboxField("Offline mode (required)", "offlineMode", response.settings.offlineMode, true),
+    createTextField("Offline bundle path", "offlineBundlePath", response.settings.offlineBundlePath),
+    createTextField("Managed runtime path", "runtimePath", response.settings.runtimePath),
+    createTextField("Installed models path", "modelsPath", response.settings.modelsPath),
+    createTextField("Installed ASR model path", "asrModelPath", response.settings.asrModelPath),
+    createTextField("Custom local model path", "customModelPath", response.settings.customModelPath),
     createCheckboxField("Speaker diarization", "diarizationEnabled", response.settings.diarizationEnabled),
-    createPasswordField("Hugging Face token", "huggingFaceToken", response.settings.huggingFaceToken),
-    createTextField("Diarization model ID", "diarizationModelId", response.settings.diarizationModelId)
+    createTextField(
+      "Installed diarization model path",
+      "diarizationModelPath",
+      response.settings.diarizationModelPath
+    )
   );
 
   const footer = createElement("div", "settings-footer");
@@ -79,17 +87,25 @@ function readSettings(formData: FormData, current: CompanionSettings): Companion
       "modelPreset",
       DEFAULT_COMPANION_SETTINGS.modelPreset
     ) as CompanionModelPreset,
-    customModelId: readString(formData, "customModelId", ""),
+    customModelPath: readString(formData, "customModelPath", ""),
+    offlineMode: true,
+    offlineBundlePath: readString(
+      formData,
+      "offlineBundlePath",
+      DEFAULT_COMPANION_SETTINGS.offlineBundlePath
+    ),
+    runtimePath: readString(formData, "runtimePath", DEFAULT_COMPANION_SETTINGS.runtimePath),
+    modelsPath: readString(formData, "modelsPath", DEFAULT_COMPANION_SETTINGS.modelsPath),
+    asrModelPath: readString(formData, "asrModelPath", ""),
     autoStartService: current.autoStartService,
     setupCompletedAt: current.setupCompletedAt,
     setupVersion: current.setupVersion,
     autoRepairEnabled: current.autoRepairEnabled,
-    huggingFaceToken: readString(formData, "huggingFaceToken", ""),
     diarizationEnabled: formData.get("diarizationEnabled") === "on",
-    diarizationModelId: readString(
+    diarizationModelPath: readString(
       formData,
-      "diarizationModelId",
-      DEFAULT_COMPANION_SETTINGS.diarizationModelId
+      "diarizationModelPath",
+      DEFAULT_COMPANION_SETTINGS.diarizationModelPath
     )
   };
 }
@@ -109,23 +125,18 @@ function createTextField(label: string, name: keyof CompanionSettings, value: st
   return row;
 }
 
-function createPasswordField(label: string, name: keyof CompanionSettings, value: string): HTMLElement {
-  const row = createField(label);
-  const input = createElement("input", "text-input");
-  input.name = name;
-  input.type = "password";
-  input.value = value;
-  input.autocomplete = "off";
-  row.append(input);
-  return row;
-}
-
-function createCheckboxField(label: string, name: keyof CompanionSettings, value: boolean): HTMLElement {
+function createCheckboxField(
+  label: string,
+  name: keyof CompanionSettings,
+  value: boolean,
+  disabled = false
+): HTMLElement {
   const row = createField(label);
   const input = createElement("input", "checkbox-input");
   input.name = name;
   input.type = "checkbox";
   input.checked = value;
+  input.disabled = disabled;
   row.append(input);
   return row;
 }

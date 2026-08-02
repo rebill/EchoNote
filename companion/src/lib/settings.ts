@@ -7,14 +7,18 @@ export type CompanionSettings = {
   preferredPort: number;
   backend: CompanionBackend;
   modelPreset: CompanionModelPreset;
-  customModelId: string;
+  customModelPath: string;
+  offlineMode: boolean;
+  offlineBundlePath: string;
+  runtimePath: string;
+  modelsPath: string;
+  asrModelPath: string;
   autoStartService: boolean;
   setupCompletedAt: string | null;
   setupVersion: string | null;
   autoRepairEnabled: boolean;
-  huggingFaceToken: string;
   diarizationEnabled: boolean;
-  diarizationModelId: string;
+  diarizationModelPath: string;
 };
 
 export type SettingsResponse = {
@@ -27,16 +31,20 @@ export const DEFAULT_COMPANION_SETTINGS: CompanionSettings = {
   pythonPath: "python3",
   asrServicePath: "../asr-service",
   preferredPort: 8765,
-  backend: "fake",
+  backend: "mlx-audio",
   modelPreset: "qwen3-0.6b-4bit",
-  customModelId: "",
+  customModelPath: "",
+  offlineMode: true,
+  offlineBundlePath: "~/Library/Application Support/EchoNote/offline-bundle",
+  runtimePath: "~/Library/Application Support/EchoNote/runtime",
+  modelsPath: "~/Library/Application Support/EchoNote/models",
+  asrModelPath: "",
   autoStartService: false,
   setupCompletedAt: null,
   setupVersion: null,
   autoRepairEnabled: false,
-  huggingFaceToken: "",
   diarizationEnabled: true,
-  diarizationModelId: "pyannote/speaker-diarization-community-1"
+  diarizationModelPath: ""
 };
 
 export const DEFAULT_SETTINGS_RESPONSE: SettingsResponse = {

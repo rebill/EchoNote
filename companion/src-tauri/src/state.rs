@@ -82,7 +82,7 @@ impl RuntimeState {
             } else {
                 DiarizationStatus::Disabled
             },
-            diarization_model_id: settings.diarization_model_id.clone(),
+            diarization_model_id: settings.diarization_model_path.clone(),
             last_error: None,
             last_exit_code: None,
             recent_logs: vec![

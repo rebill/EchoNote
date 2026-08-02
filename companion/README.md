@@ -4,7 +4,7 @@ macOS Tauri desktop app for managing the local EchoNote ASR service.
 
 This desktop app provides a Vite/TypeScript frontend and Tauri 2 Rust backend for starting, stopping, monitoring, and diagnosing the local EchoNote ASR service.
 
-Companion is source-only. The app can be built locally, but the project does not publish a signed or notarized `.app` / `.dmg` artifact for this release.
+The release build embeds the ASR service source. Dependencies and authorized model weights are installed from an external, integrity-checked offline bundle; Python 3.11+ remains a prerequisite.
 
 ## Requirements
 
@@ -55,4 +55,4 @@ Settings are stored at:
 ~/Library/Application Support/EchoNote/companion-settings.json
 ```
 
-The app recovers missing or invalid settings files by writing safe defaults. The UI can load and save Python path, ASR service path, preferred port, backend, and model preset/custom model.
+The app recovers missing or invalid settings files by writing safe defaults. The UI configures Python, the embedded ASR service, local ports, offline bundle/model paths, and ASR presets. Hugging Face tokens and remote model IDs are not used.

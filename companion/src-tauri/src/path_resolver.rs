@@ -25,11 +25,27 @@ pub(crate) fn resolve_existing_dir_result(value: &str) -> Result<PathBuf, String
         .ok_or_else(|| format!("ASR service path does not exist or is not a directory: {value}"))
 }
 
+pub(crate) fn resolve_existing_directory(value: &str) -> Option<PathBuf> {
+    generic_directory_candidates(value)
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
+        .map(|candidate| canonical_or_original(&candidate))
+}
+
 pub(crate) fn valid_asr_service_dir(path: &Path) -> bool {
     path.is_dir() && path.join("pyproject.toml").is_file() && path.join("echonote_asr").is_dir()
 }
 
 fn service_dir_candidates(value: &str) -> Vec<PathBuf> {
+    if expand_tilde(value).is_absolute() {
+        return generic_directory_candidates(value);
+    }
+    let mut candidates = generic_directory_candidates(value);
+    push_source_tree_candidates(&mut candidates);
+    candidates
+}
+
+fn generic_directory_candidates(value: &str) -> Vec<PathBuf> {
     let path = expand_tilde(value);
     if path.is_absolute() {
         return vec![path];
@@ -39,8 +55,7 @@ fn service_dir_candidates(value: &str) -> Vec<PathBuf> {
     for root in path_roots() {
         push_ancestor_candidates(&mut candidates, &root, &path);
     }
-    push_source_tree_candidates(&mut candidates);
-    push_macos_resource_candidates(&mut candidates);
+    push_macos_resource_candidates(&mut candidates, &path);
     candidates
 }
 
@@ -79,7 +94,7 @@ fn push_source_tree_candidates(candidates: &mut Vec<PathBuf>) {
     }
 }
 
-fn push_macos_resource_candidates(candidates: &mut Vec<PathBuf>) {
+fn push_macos_resource_candidates(candidates: &mut Vec<PathBuf>, path: &Path) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -89,7 +104,15 @@ fn push_macos_resource_candidates(candidates: &mut Vec<PathBuf>) {
     let Some(contents_dir) = exe_dir.parent().filter(|_| exe_dir.ends_with("MacOS")) else {
         return;
     };
-    push_unique_path(candidates, contents_dir.join("Resources/asr-service"));
+    push_unique_path(candidates, contents_dir.join("Resources").join(path));
+    if path.file_name().is_some() {
+        push_unique_path(
+            candidates,
+            contents_dir
+                .join("Resources")
+                .join(path.file_name().unwrap()),
+        );
+    }
 }
 
 fn canonical_or_original(path: &Path) -> PathBuf {

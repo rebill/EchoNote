@@ -101,7 +101,7 @@ impl ProcessManager {
         } else {
             DiarizationStatus::Disabled
         };
-        self.diarization_model_id = Some(settings.diarization_model_id.clone());
+        self.diarization_model_id = Some(settings.diarization_model_path.clone());
         self.consecutive_health_failures = 0;
         self.last_poll_at = None;
 
@@ -140,7 +140,24 @@ impl ProcessManager {
                 return;
             }
         };
-        let resolved_model_id = settings.resolved_model_id();
+        let resolved_model_id = match resolved_local_model_path(settings) {
+            Ok(path) => path,
+            Err(error) => {
+                self.fail_start(error);
+                return;
+            }
+        };
+        let diarization_model_path = if settings.diarization_enabled {
+            match resolved_diarization_model_path(settings) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    self.fail_start(error);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let mut command = Command::new(&python_path);
         command
             .current_dir(&service_dir)
@@ -164,12 +181,16 @@ impl ProcessManager {
         } else {
             command.env("ECHONOTE_DIARIZATION_ENABLED", "0");
         }
-        if !settings.diarization_model_id.trim().is_empty() {
-            command.env("ECHONOTE_DIARIZATION_MODEL_ID", settings.diarization_model_id.trim());
+        if let Some(path) = diarization_model_path {
+            command.env("ECHONOTE_DIARIZATION_MODEL_ID", path);
         }
-        if !settings.hugging_face_token.trim().is_empty() {
-            command.env("HUGGINGFACE_HUB_TOKEN", settings.hugging_face_token.trim());
-        }
+        command
+            .env("HF_HUB_OFFLINE", "1")
+            .env("TRANSFORMERS_OFFLINE", "1")
+            .env("HF_DATASETS_OFFLINE", "1")
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env_remove("HUGGINGFACE_HUB_TOKEN")
+            .env_remove("HF_TOKEN");
 
         match command.spawn() {
             Ok(child) => {
@@ -266,7 +287,15 @@ impl ProcessManager {
             return;
         };
 
-        let model_id = settings.resolved_model_id();
+        let model_id = match resolved_local_model_path(settings) {
+            Ok(path) => path,
+            Err(error) => {
+                self.model_status = ModelStatus::Error;
+                self.last_error = Some(error.clone());
+                self.push_log(error);
+                return;
+            }
+        };
         self.model_status = ModelStatus::Loading;
         self.resolved_model_id = Some(model_id.clone());
         self.last_error = None;
@@ -328,7 +357,7 @@ impl ProcessManager {
         runtime.diarization_model_id = self
             .diarization_model_id
             .clone()
-            .unwrap_or_else(|| settings.diarization_model_id.clone());
+            .unwrap_or_else(|| settings.diarization_model_path.clone());
         runtime.last_error = self.last_error.clone();
         runtime.last_exit_code = self.last_exit_code;
 
@@ -690,6 +719,45 @@ fn backend_cli_arg(backend: Backend) -> &'static str {
     }
 }
 
+fn resolved_local_model_path(settings: &CompanionSettings) -> Result<String, String> {
+    if settings.backend == Backend::Fake {
+        return Ok(settings.resolved_model_id());
+    }
+    canonical_local_model_directory(&settings.resolved_model_id(), "ASR")
+}
+
+fn resolved_diarization_model_path(settings: &CompanionSettings) -> Result<String, String> {
+    if settings.backend == Backend::Fake && settings.diarization_model_path.trim().is_empty() {
+        return Ok("offline-diarization-model-not-installed".to_string());
+    }
+    canonical_local_model_directory(&settings.diarization_model_path, "diarization")
+}
+
+fn canonical_local_model_directory(value: &str, label: &str) -> Result<String, String> {
+    let path = expand_tilde(value.trim());
+    if !path.is_dir() {
+        return Err(format!(
+            "Offline {label} model is not installed at {}. Run offline setup or select a valid local model directory.",
+            path.display()
+        ));
+    }
+    if label == "ASR" && !path.join("config.json").is_file() {
+        return Err(format!(
+            "Offline ASR model is missing config.json at {}.",
+            path.display()
+        ));
+    }
+    if label == "diarization" && !path.join("config.yaml").is_file() {
+        return Err(format!(
+            "Offline diarization model is missing config.yaml at {}.",
+            path.display()
+        ));
+    }
+    path.canonicalize()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| format!("Failed to resolve offline {label} model path: {error}"))
+}
+
 fn base_url(port: u16) -> String {
     format!("http://{ASR_HOST}:{port}")
 }
@@ -944,7 +1012,7 @@ fn format_exit_status(exit_status: ExitStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::{wait_for_child_exit, ProcessManager, MAX_HEALTH_FAILURES, RUNNING_POLL_INTERVAL};
-    use crate::settings::CompanionSettings;
+    use crate::settings::{Backend, CompanionSettings};
     use crate::state::{ModelStatus, ServiceStatus};
     use std::fs;
     use std::net::TcpListener;
@@ -1192,6 +1260,7 @@ mod tests {
         CompanionSettings {
             asr_service_path: service_dir.to_string_lossy().into_owned(),
             preferred_port: port,
+            backend: Backend::Fake,
             ..CompanionSettings::default()
         }
     }

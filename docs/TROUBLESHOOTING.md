@@ -99,7 +99,7 @@ Load the model:
 ```bash
 curl -X POST http://127.0.0.1:8765/model/load \
   -H 'Content-Type: application/json' \
-  -d '{"model_id":"mlx-community/Qwen3-ASR-0.6B-4bit"}'
+  -d '{"model_id":"/absolute/path/to/Qwen3-ASR-0.6B-4bit"}'
 ```
 
 Then check:
@@ -128,7 +128,7 @@ Restart it with:
 python -m echonote_asr \
   --host 127.0.0.1 \
   --port 8765 \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
+  --model "/absolute/path/to/Qwen3-ASR-0.6B-4bit" \
   --backend mlx-audio \
   --log-level info
 ```
@@ -156,9 +156,9 @@ curl http://127.0.0.1:8765/diarization/status
 
 Common causes:
 
-- Hugging Face token is not configured in EchoNote desktop Advanced Settings.
-- `pyannote.audio` is not installed. Install with `pip install -e 'asr-service[diarization]'` or run `Repair EchoNote`.
-- The Hugging Face account has not accepted the `pyannote/speaker-diarization-community-1` model terms.
+- The installed diarization model path is missing or does not contain `config.yaml`.
+- `pyannote.audio` is missing from the offline wheelhouse installation.
+- The offline bundle is corrupt, targets another Python minor/platform, or does not contain a diarization model.
 
 If diarization fails during `Stop Meeting`, EchoNote keeps the live transcript and shows a non-blocking notice.
 
@@ -166,7 +166,7 @@ If diarization fails during `Stop Meeting`, EchoNote keeps the live transcript a
 
 This is expected when diarization is disabled, unavailable, or failed. The final transcript can still replace the live transcript with cleaned turns, but `speaker` remains empty.
 
-Check the EchoNote desktop Runtime panel for `Speaker diarization`. If it is `Unavailable`, configure the Hugging Face token and install the diarization dependencies.
+Check the EchoNote desktop Runtime panel for `Speaker diarization`. If it is `Unavailable`, set the verified offline bundle path and run `Repair EchoNote`.
 
 ## No meeting note is created
 
