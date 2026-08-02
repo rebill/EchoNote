@@ -31,6 +31,7 @@ class ModelState:
         *,
         transcriber: Transcriber | None = None,
         temp_root: str | Path | None = None,
+        cpu_threads: int = 0,
     ) -> None:
         self._model_id = model_id
         self._backend = backend
@@ -38,7 +39,10 @@ class ModelState:
         self._error: str | None = None
         self._lock = asyncio.Lock()
         self._inference_lock = asyncio.Lock()
-        self._transcriber: Transcriber = transcriber or create_transcriber(backend)
+        self._transcriber: Transcriber = transcriber or create_transcriber(
+            backend,
+            cpu_threads=cpu_threads,
+        )
         self._workspace = tempfile.TemporaryDirectory(prefix="echonote-asr-", dir=temp_root)
         self._wav_path = Path(self._workspace.name) / "chunk.wav"
         self._closed = False

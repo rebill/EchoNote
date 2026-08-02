@@ -103,7 +103,8 @@ class TranscriptContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertIn(body["status"], {"available", "unavailable", "failed"})
-        self.assertEqual(body["model_id"], "pyannote/speaker-diarization-community-1")
+        self.assertEqual(body["model_id"], "offline-diarization-model-not-installed")
+        self.assertIn("Offline diarization model directory was not found", body["error"])
 
     def test_finalize_with_missing_diarization_dependency_degrades(self) -> None:
         segment = {

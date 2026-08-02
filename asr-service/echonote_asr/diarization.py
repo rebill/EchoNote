@@ -15,7 +15,7 @@ from .text_sanitizer import sanitize_transcript_text
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+DEFAULT_DIARIZATION_MODEL = "offline-diarization-model-not-installed"
 DEFAULT_DIARIZATION_DEVICE = "auto"
 DEFAULT_DIARIZATION_CPU_THREADS = max(1, min(2, os.cpu_count() or 1))
 DEFAULT_CPU_SEGMENTATION_STEP = 0.2
@@ -149,8 +149,11 @@ class DiarizationState:
     def _availability_error(self) -> str | None:
         if not pyannote_available():
             return "pyannote.audio is not installed"
-        if not huggingface_token():
-            return "Hugging Face token is not configured"
+        model_path = Path(self.model_id).expanduser()
+        if not model_path.is_dir():
+            return f"Offline diarization model directory was not found: {model_path}"
+        if not model_path.joinpath("config.yaml").is_file():
+            return f"Offline diarization model is missing config.yaml: {model_path}"
         return None
 
     def _load_pipeline(self) -> Any:
@@ -165,7 +168,8 @@ class DiarizationState:
             import torch
 
             configure_torch_cpu_threads(torch, self.cpu_threads)
-            pipeline = Pipeline.from_pretrained(self.model_id, token=huggingface_token())
+            model_path = Path(self.model_id).expanduser().resolve()
+            pipeline = Pipeline.from_pretrained(str(model_path))
             self._pipeline, self.resolved_device = move_pipeline_to_device_with_name(pipeline, self.device)
             self.effective_segmentation_step = resolve_segmentation_step(
                 self.segmentation_step,
@@ -305,15 +309,6 @@ def pyannote_available() -> bool:
         return importlib.util.find_spec("pyannote.audio") is not None
     except ModuleNotFoundError:
         return False
-
-
-def huggingface_token() -> str:
-    return (
-        os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or os.environ.get("HF_TOKEN")
-        or os.environ.get("PYANNOTE_AUTH_TOKEN")
-        or ""
-    ).strip()
 
 
 def move_pipeline_to_device(pipeline: Any, device_preference: str = DEFAULT_DIARIZATION_DEVICE) -> Any:

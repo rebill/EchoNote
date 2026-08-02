@@ -40,10 +40,11 @@ ThreadResult = TypeVar("ThreadResult")
 
 def create_app(
     default_model: str,
-    version: str = "0.8.1",
+    version: str = "0.9.0",
     backend: str = "fake",
     diarization_state: DiarizationState | None = None,
     preload_model: bool | None = None,
+    cpu_threads: int = 0,
 ) -> FastAPI:
     app = FastAPI(title="EchoNote ASR Service", version=version)
     app.add_middleware(
@@ -52,7 +53,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    model_state = ModelState(default_model, backend=backend)
+    model_state = ModelState(default_model, backend=backend, cpu_threads=cpu_threads)
     active_diarization_state = diarization_state or diarization_state_from_environment()
     diarization_gate = asyncio.Semaphore(1)
     app.state.model_state = model_state
@@ -60,7 +61,7 @@ def create_app(
     app.state.diarization_gate = diarization_gate
     app.state.model_preload_task = None
 
-    should_preload_model = backend == "mlx-audio" if preload_model is None else preload_model
+    should_preload_model = backend != "fake" if preload_model is None else preload_model
 
     async def start_model_preload() -> None:
         if should_preload_model:
