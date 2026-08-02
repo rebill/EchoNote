@@ -1,6 +1,7 @@
+use crate::offline_bundle;
 use crate::path_resolver;
 use crate::process;
-use crate::settings::CompanionSettings;
+use crate::settings::{Backend, CompanionSettings, ModelPreset};
 use crate::setup_types::{
     PythonCandidate, SetupDetection, SetupPrimaryAction, SetupStatus, SetupStep, SetupStepId,
     SetupStepStatus,
@@ -25,7 +26,7 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
 
     let runtime_step = runtime_step(&asr_service_path, &settings.asr_service_path);
     let python_step = python_step(&python_candidates);
-    let dependencies_ready = probe_dependencies(
+    let base_dependencies_ready = probe_dependencies(
         python_path.as_deref(),
         asr_service_path.as_deref(),
         settings.backend,
@@ -35,12 +36,40 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
         asr_service_path.as_deref(),
         DIARIZATION_DEPENDENCY_PROBE,
     );
+    let dependencies_ready =
+        base_dependencies_ready && (!settings.diarization_enabled || diarization_dependency_ready);
     let dependencies_step = dependencies_step(
-        dependencies_ready,
+        base_dependencies_ready,
         python_path.as_deref(),
         settings.diarization_enabled,
         diarization_dependency_ready,
-        !settings.hugging_face_token.trim().is_empty(),
+    );
+    let models_ready = installed_models_ready(&settings);
+    let models_step = models_step(&settings, models_ready);
+    let bundle_required = !dependencies_ready || !models_ready;
+    let offline_bundle_path =
+        path_resolver::resolve_existing_directory(&settings.offline_bundle_path);
+    let selected_python_version = python_candidates
+        .iter()
+        .find(|candidate| candidate.valid)
+        .and_then(|candidate| candidate.version.as_deref());
+    let bundle_probe = offline_bundle_path.as_deref().map(|path| {
+        let bundle = offline_bundle::probe_bundle(
+            path,
+            bundle_preset(&settings),
+            settings.diarization_enabled,
+        )?;
+        if let Some(actual_python) = selected_python_version {
+            validate_bundle_python_version(&bundle.manifest.python_version, actual_python)?;
+        }
+        Ok(bundle)
+    });
+    let offline_bundle_ready = bundle_probe.as_ref().is_some_and(Result::is_ok);
+    let offline_bundle_step = offline_bundle_step(
+        &settings.offline_bundle_path,
+        offline_bundle_path.as_deref(),
+        bundle_probe.as_ref(),
+        bundle_required,
     );
     let existing_service_healthy =
         process::request_existing_asr_health(settings.preferred_port).is_ok();
@@ -58,7 +87,9 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
         system,
         python_step,
         runtime_step,
+        offline_bundle_step,
         dependencies_step,
+        models_step,
         port_step,
         service_step,
         model_step,
@@ -76,7 +107,10 @@ pub fn detect(settings: CompanionSettings, runtime: &RuntimeState) -> SetupDetec
         python_path,
         asr_service_path: asr_service_path.map(|path| path.to_string_lossy().into_owned()),
         python_candidates,
+        offline_bundle_path: offline_bundle_path.map(|path| path.to_string_lossy().into_owned()),
+        offline_bundle_ready,
         dependencies_ready,
+        models_ready,
         port_available,
         existing_service_healthy,
     }
@@ -111,6 +145,21 @@ pub fn python_version_is_supported(raw: &str) -> bool {
     parse_python_version(raw).is_some_and(|(major, minor, _)| {
         major > MIN_PYTHON_MAJOR || (major == MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR)
     })
+}
+
+fn validate_bundle_python_version(required: &str, actual: &str) -> Result<(), String> {
+    let required = parse_python_version(required)
+        .ok_or_else(|| format!("Offline bundle contains an invalid Python version: {required}"))?;
+    let actual_version = parse_python_version(actual)
+        .ok_or_else(|| format!("Could not parse selected Python version: {actual}"))?;
+    if required.0 == actual_version.0 && required.1 == actual_version.1 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Offline bundle requires Python {}.{}, but the selected runtime is {actual}.",
+            required.0, required.1
+        ))
+    }
 }
 
 fn detect_system_step() -> SetupStep {
@@ -150,6 +199,12 @@ fn python_candidates(
             path_resolver::expand_tilde(configured_python).to_string_lossy(),
         );
     }
+    push_unique(
+        &mut candidates,
+        path_resolver::expand_tilde(&settings.runtime_path)
+            .join(".venv/bin/python")
+            .to_string_lossy(),
+    );
     if let Some(service_dir) = service_dir {
         push_unique(
             &mut candidates,
@@ -285,6 +340,7 @@ pub(crate) fn probe_dependencies(
 
     Command::new(python_path)
         .current_dir(service_dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .arg("-c")
         .arg(script)
         .status()
@@ -296,9 +352,8 @@ fn dependencies_step(
     python_path: Option<&str>,
     diarization_enabled: bool,
     diarization_dependency_ready: bool,
-    hugging_face_token_configured: bool,
 ) -> SetupStep {
-    if ready {
+    if ready && (!diarization_enabled || diarization_dependency_ready) {
         let mut step = SetupStep::new(
             SetupStepId::Dependencies,
             "Install Dependencies",
@@ -307,15 +362,24 @@ fn dependencies_step(
             true,
         );
         if diarization_enabled {
-            let detail = match (diarization_dependency_ready, hugging_face_token_configured) {
-                (true, true) => "Speaker diarization dependency and Hugging Face token are configured.",
-                (true, false) => "Speaker diarization dependency is installed; Hugging Face token is not configured.",
-                (false, true) => "Hugging Face token is configured; optional pyannote dependency is not installed.",
-                (false, false) => "Speaker diarization is optional; pyannote dependency or Hugging Face token is missing.",
+            let detail = if diarization_dependency_ready {
+                "Speaker diarization dependency is installed for offline use."
+            } else {
+                "Speaker diarization dependency is missing and must be installed from the offline bundle."
             };
             step = step.with_detail(detail);
         }
         return step;
+    }
+
+    if ready && diarization_enabled {
+        return SetupStep::new(
+            SetupStepId::Dependencies,
+            "Install Dependencies",
+            SetupStepStatus::Warning,
+            "Speaker diarization dependencies need to be installed from the offline bundle.",
+            true,
+        );
     }
 
     let status = if python_path.is_some() {
@@ -332,6 +396,111 @@ fn dependencies_step(
     )
 }
 
+fn offline_bundle_step(
+    configured_path: &str,
+    resolved_path: Option<&Path>,
+    probe: Option<&Result<offline_bundle::VerifiedOfflineBundle, String>>,
+    required: bool,
+) -> SetupStep {
+    match probe {
+        Some(Ok(bundle)) => SetupStep::new(
+            SetupStepId::OfflineBundle,
+            "Verify Offline Bundle",
+            SetupStepStatus::Passed,
+            "Offline installation bundle is available.",
+            true,
+        )
+        .with_detail(format!(
+            "{} (bundle {}, Python {})",
+            bundle.root.display(),
+            bundle.manifest.bundle_version,
+            bundle.manifest.python_version
+        )),
+        Some(Err(error)) if required => SetupStep::new(
+            SetupStepId::OfflineBundle,
+            "Verify Offline Bundle",
+            SetupStepStatus::Failed,
+            "Offline bundle is invalid and setup cannot continue.",
+            true,
+        )
+        .with_detail(error),
+        Some(Err(error)) => SetupStep::new(
+            SetupStepId::OfflineBundle,
+            "Verify Offline Bundle",
+            SetupStepStatus::Warning,
+            "Installed runtime is usable, but the configured repair bundle is invalid.",
+            true,
+        )
+        .with_detail(error),
+        None if required => SetupStep::new(
+            SetupStepId::OfflineBundle,
+            "Verify Offline Bundle",
+            SetupStepStatus::Failed,
+            "Offline bundle is required to install or repair EchoNote.",
+            true,
+        )
+        .with_detail(format!("Configured path: {configured_path}")),
+        None => SetupStep::new(
+            SetupStepId::OfflineBundle,
+            "Verify Offline Bundle",
+            SetupStepStatus::Warning,
+            "Offline bundle is not mounted; the installed runtime can still run.",
+            true,
+        )
+        .with_detail(
+            resolved_path
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| format!("Configured path: {configured_path}")),
+        ),
+    }
+}
+
+fn installed_models_ready(settings: &CompanionSettings) -> bool {
+    if settings.backend == Backend::Fake {
+        return true;
+    }
+    let asr_path = path_resolver::expand_tilde(&settings.resolved_model_id());
+    if !asr_path.is_dir() || !asr_path.join("config.json").is_file() {
+        return false;
+    }
+    if settings.diarization_enabled {
+        let diarization = path_resolver::expand_tilde(&settings.diarization_model_path);
+        if !diarization.is_dir() || !diarization.join("config.yaml").is_file() {
+            return false;
+        }
+    }
+    true
+}
+
+fn models_step(settings: &CompanionSettings, ready: bool) -> SetupStep {
+    if ready {
+        return SetupStep::new(
+            SetupStepId::Models,
+            "Install Offline Models",
+            SetupStepStatus::Passed,
+            "Required local model files are installed.",
+            true,
+        )
+        .with_detail(settings.resolved_model_id());
+    }
+
+    SetupStep::new(
+        SetupStepId::Models,
+        "Install Offline Models",
+        SetupStepStatus::Warning,
+        "Local ASR or diarization models need to be installed from the offline bundle.",
+        true,
+    )
+}
+
+fn bundle_preset(settings: &CompanionSettings) -> &'static str {
+    if settings.model_preset == ModelPreset::Custom {
+        "qwen3-0.6b-4bit"
+    } else {
+        settings.selected_preset()
+    }
+}
+
 fn probe_python_import(
     python_path: Option<&str>,
     service_dir: Option<&Path>,
@@ -343,6 +512,7 @@ fn probe_python_import(
 
     Command::new(python_path)
         .current_dir(service_dir)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .arg("-c")
         .arg(script)
         .status()
@@ -491,7 +661,10 @@ fn derive_status(
     let has_failed_required = steps.iter().any(|step| {
         matches!(
             step.id,
-            SetupStepId::Python | SetupStepId::Runtime | SetupStepId::Port
+            SetupStepId::Python
+                | SetupStepId::Runtime
+                | SetupStepId::OfflineBundle
+                | SetupStepId::Port
         ) && step.status == SetupStepStatus::Failed
     });
     if has_failed_required {
@@ -517,7 +690,10 @@ fn derive_status(
     let dependencies_ready = steps
         .iter()
         .any(|step| step.id == SetupStepId::Dependencies && step.status == SetupStepStatus::Passed);
-    if dependencies_ready {
+    let models_ready = steps
+        .iter()
+        .any(|step| step.id == SetupStepId::Models && step.status == SetupStepStatus::Passed);
+    if dependencies_ready && models_ready {
         return (
             SetupStatus::Ready,
             SetupPrimaryAction::Start,
@@ -548,8 +724,9 @@ fn push_unique(values: &mut Vec<String>, value: impl AsRef<str>) {
 mod tests {
     use super::{
         derive_status, parse_python_version, python_candidates, python_version_is_supported,
-        resolve_asr_service_path,
+        resolve_asr_service_path, validate_bundle_python_version,
     };
+    use crate::path_resolver;
     use crate::settings::CompanionSettings;
     use crate::setup_types::{
         SetupPrimaryAction, SetupStatus, SetupStep, SetupStepId, SetupStepStatus,
@@ -570,6 +747,12 @@ mod tests {
         assert!(python_version_is_supported("Python 3.11.0"));
         assert!(python_version_is_supported("Python 3.12.1"));
         assert!(!python_version_is_supported("Python 3.10.13"));
+    }
+
+    #[test]
+    fn offline_bundle_requires_an_exact_python_minor() {
+        assert!(validate_bundle_python_version("3.11", "Python 3.11.9").is_ok());
+        assert!(validate_bundle_python_version("3.11", "Python 3.12.1").is_err());
     }
 
     #[test]
@@ -597,8 +780,13 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(paths[0], "/tmp/echonote-custom-python");
+        let managed_python = path_resolver::expand_tilde(&settings.runtime_path)
+            .join(".venv/bin/python")
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(paths[1], managed_python);
         let venv_python = path.join(".venv/bin/python").to_string_lossy().to_string();
-        assert_eq!(paths[1], venv_python);
+        assert_eq!(paths[2], venv_python);
         assert!(paths.contains(&"python3"));
         assert!(paths.contains(&"python"));
 
@@ -618,9 +806,14 @@ mod tests {
             .iter()
             .map(|candidate| candidate.path.as_str())
             .collect::<Vec<_>>();
-        let venv_python = path.join(".venv/bin/python").to_string_lossy().to_string();
+        let managed_python = path_resolver::expand_tilde(&settings.runtime_path)
+            .join(".venv/bin/python")
+            .to_string_lossy()
+            .to_string();
 
-        assert_eq!(paths[0], venv_python);
+        assert_eq!(paths[0], managed_python);
+        let venv_python = path.join(".venv/bin/python").to_string_lossy().to_string();
+        assert_eq!(paths[1], venv_python);
         assert!(paths.contains(&"python3"));
 
         let _ = fs::remove_dir_all(path);
@@ -667,6 +860,35 @@ mod tests {
         assert_eq!(message, "EchoNote could not complete setup.");
     }
 
+    #[test]
+    fn missing_offline_bundle_requires_repair_when_installation_is_incomplete() {
+        let (status, primary_action, _) = derive_status(
+            &ready_steps_with_failed(SetupStepId::OfflineBundle),
+            ServiceStatus::Stopped,
+        );
+
+        assert_eq!(status, SetupStatus::RepairRequired);
+        assert_eq!(primary_action, SetupPrimaryAction::Repair);
+    }
+
+    #[test]
+    fn missing_installed_models_prevents_ready_status() {
+        let mut steps = ready_steps_with_failed(SetupStepId::Obsidian);
+        for step in &mut steps {
+            if step.id == SetupStepId::Obsidian {
+                step.status = SetupStepStatus::Passed;
+            }
+            if step.id == SetupStepId::Models {
+                step.status = SetupStepStatus::Warning;
+            }
+        }
+
+        let (status, primary_action, _) = derive_status(&steps, ServiceStatus::Stopped);
+
+        assert_eq!(status, SetupStatus::NotConfigured);
+        assert_eq!(primary_action, SetupPrimaryAction::Setup);
+    }
+
     fn temp_service_dir() -> std::path::PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -687,7 +909,9 @@ mod tests {
             SetupStepId::System,
             SetupStepId::Python,
             SetupStepId::Runtime,
+            SetupStepId::OfflineBundle,
             SetupStepId::Dependencies,
+            SetupStepId::Models,
             SetupStepId::Port,
             SetupStepId::Service,
             SetupStepId::Model,

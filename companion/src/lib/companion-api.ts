@@ -169,7 +169,8 @@ function normalizeSettings(settings: CompanionSettings): CompanionSettings {
     ? settings.preferredPort
     : DEFAULT_COMPANION_SETTINGS.preferredPort;
 
-  const modelPreset = settings.modelPreset === "custom" && !settings.customModelId.trim()
+  const customModelPath = settings.customModelPath?.trim() || "";
+  const modelPreset = settings.modelPreset === "custom" && !customModelPath
     ? DEFAULT_COMPANION_SETTINGS.modelPreset
     : settings.modelPreset;
 
@@ -179,26 +180,27 @@ function normalizeSettings(settings: CompanionSettings): CompanionSettings {
     preferredPort,
     backend: settings.backend,
     modelPreset,
-    customModelId: settings.customModelId.trim(),
+    customModelPath,
+    offlineMode: true,
+    offlineBundlePath:
+      settings.offlineBundlePath?.trim() || DEFAULT_COMPANION_SETTINGS.offlineBundlePath,
+    runtimePath: settings.runtimePath?.trim() || DEFAULT_COMPANION_SETTINGS.runtimePath,
+    modelsPath: settings.modelsPath?.trim() || DEFAULT_COMPANION_SETTINGS.modelsPath,
+    asrModelPath: settings.asrModelPath?.trim() || "",
     autoStartService: Boolean(settings.autoStartService),
     setupCompletedAt: settings.setupCompletedAt ?? null,
     setupVersion: settings.setupVersion?.trim() || null,
     autoRepairEnabled: Boolean(settings.autoRepairEnabled),
-    huggingFaceToken: settings.huggingFaceToken?.trim() || "",
     diarizationEnabled: settings.diarizationEnabled ?? true,
-    diarizationModelId:
-      settings.diarizationModelId?.trim() || DEFAULT_COMPANION_SETTINGS.diarizationModelId
+    diarizationModelPath: settings.diarizationModelPath?.trim() || ""
   };
 }
 
 function resolveModelId(settings: CompanionSettings): string {
-  if (settings.modelPreset === "qwen3-1.7b-4bit") {
-    return "mlx-community/Qwen3-ASR-1.7B-4bit";
+  if (settings.modelPreset === "custom" && settings.customModelPath.trim()) {
+    return settings.customModelPath.trim();
   }
-  if (settings.modelPreset === "custom" && settings.customModelId.trim()) {
-    return settings.customModelId.trim();
-  }
-  return "mlx-community/Qwen3-ASR-0.6B-4bit";
+  return settings.asrModelPath.trim() || "offline-asr-model-not-installed";
 }
 
 function serviceControlFallback(action: string): CompanionAppState {

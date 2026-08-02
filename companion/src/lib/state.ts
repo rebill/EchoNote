@@ -26,10 +26,10 @@ export const DEFAULT_COMPANION_STATE: CompanionAppState = {
   modelStatus: "unknown",
   baseUrl: "http://127.0.0.1:8765",
   pid: null,
-  resolvedModelId: "mlx-community/Qwen3-ASR-0.6B-4bit",
+  resolvedModelId: "offline-asr-model-not-installed",
   backend: "fake",
   diarizationStatus: "unavailable",
-  diarizationModelId: "pyannote/speaker-diarization-community-1",
+  diarizationModelId: "offline-diarization-model-not-installed",
   lastError: null,
   lastExitCode: null,
   recentLogs: [

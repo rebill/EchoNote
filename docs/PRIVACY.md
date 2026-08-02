@@ -14,13 +14,13 @@ Meeting audio is sent from the Obsidian plugin to the local ASR service on the s
 
 EchoNote MVP does not send meeting audio to cloud ASR services.
 
-## 2. Model Download
+## 2. Offline Models and Installation
 
-The first time you use `mlx-community/Qwen3-ASR-0.6B-4bit`, MLX / Hugging Face tooling may download model files from the internet.
+EchoNote v0.9.0 does not download ASR or speaker diarization models at runtime. Companion installs authorized local model files from a transferred offline bundle after checking every file's size and SHA-256.
 
-If speaker diarization is enabled, `pyannote.audio` may download `pyannote/speaker-diarization-community-1` after you configure a Hugging Face token and accept the model terms.
+Dependency installation uses a local wheelhouse with `pip --no-index`. The ASR process forces Hugging Face and Transformers offline modes and removes Hugging Face token variables.
 
-After models are cached locally, ASR inference and diarization run on your machine.
+The connected machine used to create the bundle may download packages and model files. Model licenses and redistribution permissions remain the bundle creator's responsibility.
 
 ## 3. Raw Audio Storage
 
@@ -71,7 +71,7 @@ If you want summary generation to remain local, configure an OpenAI-compatible l
 
 EchoNote MVP stores API keys in Obsidian plugin settings.
 
-EchoNote desktop stores the Hugging Face token used for optional speaker diarization in its local Companion settings file. The token is passed to the local ASR service through an environment variable and must not be written to discovery files, diagnostics, or logs.
+EchoNote desktop does not require or store a Hugging Face token. Legacy Companion token fields are removed when settings are migrated to v0.9.0.
 
 Do not share your vault configuration files if they contain API keys.
 

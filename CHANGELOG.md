@@ -4,6 +4,35 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [0.9.0] - 2026-07-16
+
+### Added
+
+- Added a portable offline bundle contract containing a wheelhouse, locked requirements, local ASR and diarization models, platform/Python metadata, and SHA-256 for every bundled file.
+- Added a bundle builder that materializes Hugging Face cache symlinks into regular files and rejects remote or editable requirement sources.
+- Added Companion setup steps for offline bundle validation and atomic local model installation with backup rollback.
+
+### Changed
+
+- Real ASR and speaker diarization now accept local model directories only and start with Hugging Face, Transformers, and Datasets offline modes forced on.
+- Companion dependency installation now uses `pip --no-index --find-links` with no pip upgrade, index fallback, or optional online diarization install.
+- Removed Hugging Face token settings and runtime environment injection.
+- Offline bundles, managed Python environments, and installed models now default to stable directories under `~/Library/Application Support/EchoNote`.
+
+### Fixed
+
+- Packaged Companion builds no longer attempt to create `.venv` inside the signed `.app`; the managed environment lives at `~/Library/Application Support/EchoNote/runtime/.venv` and survives application upgrades.
+- Packaged ASR launches disable Python bytecode writes so `__pycache__` cannot invalidate the application bundle's sealed resources.
+
+### Security
+
+- Offline installation rejects path traversal, absolute manifest paths, symlinks, missing or undeclared files, invalid hashes, wrong platforms, and incompatible Python minor versions before mutating the installed runtime.
+
+### Limitations
+
+- Python 3.11+ remains a prerequisite and is not bundled.
+- Summarization and LLM transcript correction remain outside the offline guarantee and may use configured cloud providers.
+
 ## [0.8.1] - 2026-07-16
 
 ### Changed
@@ -168,6 +197,7 @@ This project follows semantic versioning for release tags.
 - Collapse runaway repeated ASR transcript text before writing meeting notes.
 - Add ASR service and plugin-side transcript sanitization guards for pathological repeated output.
 
+[0.9.0]: https://github.com/rebill/EchoNote/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/rebill/EchoNote/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rebill/EchoNote/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/rebill/EchoNote/compare/v0.7.0...v0.7.1

@@ -81,7 +81,7 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 
 ```json
 {
-  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/Qwen3-ASR-0.6B-4bit",
   "status": "ready",
   "error": null
 }
@@ -100,7 +100,7 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 
 ```json
 {
-  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit"
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/Qwen3-ASR-0.6B-4bit"
 }
 ```
 
@@ -108,7 +108,7 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
 
 ```json
 {
-  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit",
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/Qwen3-ASR-0.6B-4bit",
   "status": "loading"
 }
 ```
@@ -144,7 +144,7 @@ Python 契约文件：[asr-service/echonote_asr/schemas.py](../asr-service/echon
   "started_at_ms": 180000,
   "ended_at_ms": 195000,
   "language": "zh",
-  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit"
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/Qwen3-ASR-0.6B-4bit"
 }
 ```
 
@@ -177,8 +177,8 @@ v0.8.0 不改变响应 JSON。服务端结构化日志为每个请求增加 `loc
 ```json
 {
   "status": "unavailable",
-  "model_id": "pyannote/speaker-diarization-community-1",
-  "error": "Hugging Face token is not configured"
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/speaker-diarization-community-1",
+  "error": "Offline diarization model directory was not found"
 }
 ```
 
@@ -223,8 +223,8 @@ v0.8.0 不改变响应 JSON。服务端结构化日志为每个请求增加 `loc
       "total_ms": 6000
     }
   ],
-  "model_id": "mlx-community/Qwen3-ASR-0.6B-4bit",
-  "diarization_model_id": "pyannote/speaker-diarization-community-1",
+  "model_id": "/Users/example/Library/Application Support/EchoNote/models/Qwen3-ASR-0.6B-4bit",
+  "diarization_model_id": "/Users/example/Library/Application Support/EchoNote/models/speaker-diarization-community-1",
   "diarization_status": "available",
   "error": null
 }
@@ -233,7 +233,7 @@ v0.8.0 不改变响应 JSON。服务端结构化日志为每个请求增加 `loc
 降级规则：
 
 - `enable_diarization=false` 时返回 `diarization_status=disabled`，turns 的 `speaker` 可以为 `null`。
-- 未配置 Hugging Face token 或未安装 `pyannote.audio` 时返回 HTTP 200 和 `diarization_status=unavailable`。
+- 本地 diarization 模型目录缺失、`config.yaml` 缺失或未安装 `pyannote.audio` 时返回 HTTP 200 和 `diarization_status=unavailable`。
 - diarization 运行失败时返回 HTTP 200 和 `diarization_status=failed`，不得返回空 transcript 覆盖实时稿。
 
 `finalize_completed` 日志包含 diarization queue wait、temporary write/cleanup、diarization、assignment、merge

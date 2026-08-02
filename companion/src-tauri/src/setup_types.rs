@@ -1,4 +1,4 @@
-use crate::settings::{Backend, CompanionSettings};
+use crate::settings::CompanionSettings;
 use crate::state::CompanionAppState;
 use serde::Serialize;
 
@@ -23,7 +23,9 @@ pub enum SetupStepId {
     System,
     Python,
     Runtime,
+    OfflineBundle,
     Dependencies,
+    Models,
     Port,
     Service,
     Model,
@@ -118,7 +120,10 @@ pub struct SetupDetection {
     pub python_path: Option<String>,
     pub asr_service_path: Option<String>,
     pub python_candidates: Vec<PythonCandidate>,
+    pub offline_bundle_path: Option<String>,
+    pub offline_bundle_ready: bool,
     pub dependencies_ready: bool,
+    pub models_ready: bool,
     pub port_available: bool,
     pub existing_service_healthy: bool,
 }
@@ -133,12 +138,5 @@ impl SetupDetection {
             primary_action: self.primary_action,
             message: self.message,
         }
-    }
-}
-
-pub fn backend_dependency_extra(backend: Backend) -> &'static str {
-    match backend {
-        Backend::Fake => ".",
-        Backend::MlxAudio => ".[mlx]",
     }
 }

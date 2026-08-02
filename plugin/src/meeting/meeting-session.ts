@@ -12,6 +12,7 @@ import { AsrServiceClient } from "../asr/asr-service-client";
 import type { TranscriptTurn } from "../asr/asr-types";
 import type { EchoNoteSettings } from "../settings/settings";
 import { createAsrRuntimeStatus, createCompanionResolutionStatus } from "../status/companion-status";
+import { createMeetingStartStatus } from "../status/meeting-status";
 import type { StatusStore } from "../status/status-store";
 import { createEchoNoteError } from "../utils/errors";
 import { getMeetingArtifactPaths, getMeetingAudioFolder, sanitizeMeetingId } from "./meeting-artifacts";
@@ -115,12 +116,7 @@ export class MeetingSessionController {
     this.starting = true;
 
     try {
-      this.options.statusStore.setState({
-        asrService: "starting",
-        model: "unknown",
-        recording: "starting",
-        lastError: null
-      });
+      this.options.statusStore.setState(createMeetingStartStatus());
       new Notice("EchoNote: checking ASR service...");
 
       const runtime = await resolveAsrRuntime(settings);

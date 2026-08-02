@@ -174,7 +174,9 @@ fn setup_failure_summary(step_id: SetupStepId) -> &'static str {
     match step_id {
         SetupStepId::Python => "EchoNote could not prepare Python.",
         SetupStepId::Runtime => "EchoNote could not prepare the ASR runtime.",
+        SetupStepId::OfflineBundle => "EchoNote could not verify the offline bundle.",
         SetupStepId::Dependencies => "EchoNote could not install ASR dependencies.",
+        SetupStepId::Models => "EchoNote could not install offline models.",
         SetupStepId::Service => "EchoNote could not start the local service.",
         _ => "EchoNote setup failed.",
     }

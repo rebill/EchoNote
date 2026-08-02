@@ -1,6 +1,7 @@
 mod commands;
 mod discovery;
 mod logs;
+mod offline_bundle;
 mod path_resolver;
 mod process;
 mod settings;

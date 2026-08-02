@@ -118,7 +118,7 @@ impl CompanionDiscovery {
 #[cfg(test)]
 mod tests {
     use super::DiscoveryWriter;
-    use crate::settings::CompanionSettings;
+    use crate::settings::{Backend, CompanionSettings};
     use crate::state::{ModelStatus, RuntimeState, ServiceStatus};
     use serde_json::Value;
     use std::fs;
@@ -128,7 +128,10 @@ mod tests {
     fn writes_schema_compatible_discovery_file_atomically() {
         let path = temp_discovery_path();
         let writer = DiscoveryWriter::from_path(path.clone());
-        let settings = CompanionSettings::default();
+        let settings = CompanionSettings {
+            backend: Backend::Fake,
+            ..CompanionSettings::default()
+        };
         let mut runtime = RuntimeState::from_settings(&settings);
         runtime.service_status = ServiceStatus::Running;
         runtime.model_status = ModelStatus::NotLoaded;
@@ -146,7 +149,7 @@ mod tests {
         assert_eq!(discovery["host"], "127.0.0.1");
         assert_eq!(discovery["port"], 8765);
         assert_eq!(discovery["backend"], "fake");
-        assert_eq!(discovery["modelId"], "mlx-community/Qwen3-ASR-0.6B-4bit");
+        assert_eq!(discovery["modelId"], "offline-asr-model-not-installed");
         assert_eq!(discovery["modelStatus"], "not_loaded");
         assert_eq!(discovery["pid"], 1234);
         assert_eq!(discovery["capabilities"]["adaptiveChunking"], true);

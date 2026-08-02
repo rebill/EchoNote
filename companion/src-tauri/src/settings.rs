@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 const SETTINGS_FILE_NAME: &str = "companion-settings.json";
-const DEFAULT_MODEL_QWEN3_0_6B: &str = "mlx-community/Qwen3-ASR-0.6B-4bit";
-const DEFAULT_MODEL_QWEN3_1_7B: &str = "mlx-community/Qwen3-ASR-1.7B-4bit";
-const DEFAULT_DIARIZATION_MODEL: &str = "pyannote/speaker-diarization-community-1";
+const OFFLINE_MODEL_NOT_INSTALLED: &str = "offline-asr-model-not-installed";
+const DEFAULT_OFFLINE_BUNDLE_PATH: &str = "~/Library/Application Support/EchoNote/offline-bundle";
+const DEFAULT_RUNTIME_PATH: &str = "~/Library/Application Support/EchoNote/runtime";
+const DEFAULT_MODELS_PATH: &str = "~/Library/Application Support/EchoNote/models";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -17,7 +18,7 @@ pub enum Backend {
 
 impl Default for Backend {
     fn default() -> Self {
-        Self::Fake
+        Self::MlxAudio
     }
 }
 
@@ -45,14 +46,20 @@ pub struct CompanionSettings {
     pub preferred_port: u16,
     pub backend: Backend,
     pub model_preset: ModelPreset,
-    pub custom_model_id: String,
+    #[serde(alias = "customModelId")]
+    pub custom_model_path: String,
+    pub offline_mode: bool,
+    pub offline_bundle_path: String,
+    pub runtime_path: String,
+    pub models_path: String,
+    pub asr_model_path: String,
     pub auto_start_service: bool,
     pub setup_completed_at: Option<String>,
     pub setup_version: Option<String>,
     pub auto_repair_enabled: bool,
-    pub hugging_face_token: String,
     pub diarization_enabled: bool,
-    pub diarization_model_id: String,
+    #[serde(alias = "diarizationModelId")]
+    pub diarization_model_path: String,
 }
 
 impl Default for CompanionSettings {
@@ -61,16 +68,20 @@ impl Default for CompanionSettings {
             python_path: "python3".to_string(),
             asr_service_path: "../asr-service".to_string(),
             preferred_port: 8765,
-            backend: Backend::Fake,
+            backend: Backend::MlxAudio,
             model_preset: ModelPreset::Qwen3_0_6b4bit,
-            custom_model_id: String::new(),
+            custom_model_path: String::new(),
+            offline_mode: true,
+            offline_bundle_path: DEFAULT_OFFLINE_BUNDLE_PATH.to_string(),
+            runtime_path: DEFAULT_RUNTIME_PATH.to_string(),
+            models_path: DEFAULT_MODELS_PATH.to_string(),
+            asr_model_path: String::new(),
             auto_start_service: false,
             setup_completed_at: None,
             setup_version: None,
             auto_repair_enabled: false,
-            hugging_face_token: String::new(),
             diarization_enabled: true,
-            diarization_model_id: DEFAULT_DIARIZATION_MODEL.to_string(),
+            diarization_model_path: String::new(),
         }
     }
 }
@@ -82,10 +93,14 @@ impl CompanionSettings {
         self.python_path = trimmed_or_default(self.python_path, defaults.python_path);
         self.asr_service_path =
             trimmed_or_default(self.asr_service_path, defaults.asr_service_path);
-        self.custom_model_id = self.custom_model_id.trim().to_string();
-        self.hugging_face_token = self.hugging_face_token.trim().to_string();
-        self.diarization_model_id =
-            trimmed_or_default(self.diarization_model_id, defaults.diarization_model_id);
+        self.custom_model_path = self.custom_model_path.trim().to_string();
+        self.offline_mode = true;
+        self.offline_bundle_path =
+            trimmed_or_default(self.offline_bundle_path, defaults.offline_bundle_path);
+        self.runtime_path = trimmed_or_default(self.runtime_path, defaults.runtime_path);
+        self.models_path = trimmed_or_default(self.models_path, defaults.models_path);
+        self.asr_model_path = self.asr_model_path.trim().to_string();
+        self.diarization_model_path = self.diarization_model_path.trim().to_string();
         self.setup_completed_at = self
             .setup_completed_at
             .map(|value| value.trim().to_string())
@@ -99,7 +114,7 @@ impl CompanionSettings {
             self.preferred_port = defaults.preferred_port;
         }
 
-        if self.model_preset == ModelPreset::Custom && self.custom_model_id.is_empty() {
+        if self.model_preset == ModelPreset::Custom && self.custom_model_path.is_empty() {
             self.model_preset = defaults.model_preset;
         }
 
@@ -107,17 +122,22 @@ impl CompanionSettings {
     }
 
     pub fn resolved_model_id(&self) -> String {
+        let configured = match self.model_preset {
+            ModelPreset::Custom => self.custom_model_path.trim(),
+            ModelPreset::Qwen3_0_6b4bit | ModelPreset::Qwen3_1_7b4bit => self.asr_model_path.trim(),
+        };
+        if configured.is_empty() {
+            OFFLINE_MODEL_NOT_INSTALLED.to_string()
+        } else {
+            configured.to_string()
+        }
+    }
+
+    pub fn selected_preset(&self) -> &'static str {
         match self.model_preset {
-            ModelPreset::Qwen3_0_6b4bit => DEFAULT_MODEL_QWEN3_0_6B.to_string(),
-            ModelPreset::Qwen3_1_7b4bit => DEFAULT_MODEL_QWEN3_1_7B.to_string(),
-            ModelPreset::Custom => {
-                let custom_model_id = self.custom_model_id.trim();
-                if custom_model_id.is_empty() {
-                    DEFAULT_MODEL_QWEN3_0_6B.to_string()
-                } else {
-                    custom_model_id.to_string()
-                }
-            }
+            ModelPreset::Qwen3_0_6b4bit => "qwen3-0.6b-4bit",
+            ModelPreset::Qwen3_1_7b4bit => "qwen3-1.7b-4bit",
+            ModelPreset::Custom => "custom",
         }
     }
 }
@@ -167,9 +187,10 @@ impl SettingsStore {
         };
 
         match serde_json::from_str::<CompanionSettings>(&raw) {
-            Ok(settings) => {
+            Ok(mut settings) => {
+                apply_legacy_migration(&raw, &mut settings);
                 let normalized = settings.clone().normalized();
-                if normalized != settings {
+                if normalized != settings || contains_legacy_online_settings(&raw) {
                     self.write(&normalized)?;
                 }
                 Ok(self.response(normalized, false))
@@ -194,7 +215,10 @@ impl SettingsStore {
         };
 
         match serde_json::from_str::<CompanionSettings>(&raw) {
-            Ok(settings) => self.response(settings.normalized(), false),
+            Ok(mut settings) => {
+                apply_legacy_migration(&raw, &mut settings);
+                self.response(settings.normalized(), false)
+            }
             Err(_) => self.response(CompanionSettings::default(), true),
         }
     }
@@ -243,6 +267,21 @@ fn trimmed_or_default(value: String, default_value: String) -> String {
     }
 }
 
+fn contains_legacy_online_settings(raw: &str) -> bool {
+    raw.contains("\"huggingFaceToken\"")
+        || raw.contains("\"customModelId\"")
+        || raw.contains("\"diarizationModelId\"")
+}
+
+fn apply_legacy_migration(raw: &str, settings: &mut CompanionSettings) {
+    if raw.contains("\"customModelId\"") {
+        settings.custom_model_path.clear();
+    }
+    if raw.contains("\"diarizationModelId\"") {
+        settings.diarization_model_path.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SettingsStore;
@@ -251,23 +290,23 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn resolves_model_id_from_preset() {
+    fn reports_uninstalled_offline_model_by_default() {
         let settings = CompanionSettings::default();
         assert_eq!(
             settings.resolved_model_id(),
-            "mlx-community/Qwen3-ASR-0.6B-4bit"
+            "offline-asr-model-not-installed"
         );
     }
 
     #[test]
-    fn resolves_custom_model_id() {
+    fn resolves_custom_local_model_path() {
         let settings = CompanionSettings {
             model_preset: ModelPreset::Custom,
-            custom_model_id: " custom/model ".to_string(),
+            custom_model_path: " /models/custom ".to_string(),
             ..CompanionSettings::default()
         };
 
-        assert_eq!(settings.resolved_model_id(), "custom/model");
+        assert_eq!(settings.resolved_model_id(), "/models/custom");
     }
 
     #[test]
@@ -278,14 +317,18 @@ mod tests {
             preferred_port: 0,
             backend: Backend::MlxAudio,
             model_preset: ModelPreset::Custom,
-            custom_model_id: " ".to_string(),
+            custom_model_path: " ".to_string(),
+            offline_mode: false,
+            offline_bundle_path: " ".to_string(),
+            runtime_path: " ".to_string(),
+            models_path: " ".to_string(),
+            asr_model_path: " /models/asr ".to_string(),
             auto_start_service: true,
             setup_completed_at: Some(" ".to_string()),
             setup_version: Some(" 0.3.0 ".to_string()),
             auto_repair_enabled: true,
-            hugging_face_token: " hf-token ".to_string(),
             diarization_enabled: true,
-            diarization_model_id: " ".to_string(),
+            diarization_model_path: " /models/diarization ".to_string(),
         }
         .normalized();
 
@@ -294,16 +337,26 @@ mod tests {
         assert_eq!(settings.preferred_port, 8765);
         assert_eq!(settings.backend, Backend::MlxAudio);
         assert_eq!(settings.model_preset, ModelPreset::Qwen3_0_6b4bit);
+        assert!(settings.offline_mode);
+        assert_eq!(
+            settings.offline_bundle_path,
+            "~/Library/Application Support/EchoNote/offline-bundle"
+        );
+        assert_eq!(
+            settings.runtime_path,
+            "~/Library/Application Support/EchoNote/runtime"
+        );
+        assert_eq!(
+            settings.models_path,
+            "~/Library/Application Support/EchoNote/models"
+        );
+        assert_eq!(settings.asr_model_path, "/models/asr");
         assert!(settings.auto_start_service);
         assert_eq!(settings.setup_completed_at, None);
         assert_eq!(settings.setup_version.as_deref(), Some("0.3.0"));
         assert!(settings.auto_repair_enabled);
-        assert_eq!(settings.hugging_face_token, "hf-token");
         assert!(settings.diarization_enabled);
-        assert_eq!(
-            settings.diarization_model_id,
-            "pyannote/speaker-diarization-community-1"
-        );
+        assert_eq!(settings.diarization_model_path, "/models/diarization");
     }
 
     #[test]
@@ -321,29 +374,27 @@ mod tests {
                 preferred_port: 9001,
                 backend: Backend::MlxAudio,
                 model_preset: ModelPreset::Custom,
-                custom_model_id: "local/model".to_string(),
+                custom_model_path: "/models/local".to_string(),
                 auto_start_service: true,
                 setup_completed_at: Some("2026-05-21T00:00:00Z".to_string()),
                 setup_version: Some("0.3.0".to_string()),
                 auto_repair_enabled: true,
-                hugging_face_token: "hf_secret".to_string(),
                 diarization_enabled: true,
-                diarization_model_id: "pyannote/custom".to_string(),
+                diarization_model_path: "/models/pyannote".to_string(),
                 ..CompanionSettings::default()
             })
             .expect("save settings");
 
         assert!(!saved.recovered);
         assert_eq!(saved.settings.preferred_port, 9001);
-        assert_eq!(saved.settings.resolved_model_id(), "local/model");
+        assert_eq!(saved.settings.resolved_model_id(), "/models/local");
 
         let reloaded = store.load_or_default().expect("reload settings");
         assert!(!reloaded.recovered);
         assert_eq!(reloaded.settings.python_path, "/usr/bin/python3");
         assert_eq!(reloaded.settings.backend, Backend::MlxAudio);
         assert_eq!(reloaded.settings.setup_version.as_deref(), Some("0.3.0"));
-        assert_eq!(reloaded.settings.hugging_face_token, "hf_secret");
-        assert_eq!(reloaded.settings.diarization_model_id, "pyannote/custom");
+        assert_eq!(reloaded.settings.diarization_model_path, "/models/pyannote");
 
         fs::write(&path, "{not-json").expect("write invalid json");
         let recovered = store.load_or_default().expect("recover default settings");
@@ -351,6 +402,34 @@ mod tests {
         assert_eq!(recovered.settings, CompanionSettings::default());
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn removes_legacy_token_and_remote_model_fields_during_migration() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("settings parent"))
+            .expect("create settings parent");
+        fs::write(
+            &path,
+            r#"{
+  "backend": "mlx-audio",
+  "huggingFaceToken": "hf_secret",
+  "customModelId": "mlx-community/remote-model",
+  "diarizationModelId": "pyannote/remote-model"
+}"#,
+        )
+        .expect("write legacy settings");
+        let store = SettingsStore::from_path(path.clone());
+
+        let migrated = store.load_or_default().expect("migrate settings");
+        let persisted = fs::read_to_string(&path).expect("read migrated settings");
+
+        assert!(!migrated.recovered);
+        assert!(!persisted.contains("huggingFaceToken"));
+        assert!(!persisted.contains("customModelId"));
+        assert!(!persisted.contains("diarizationModelId"));
+        assert!(persisted.contains("offlineMode"));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
     }
 
     fn temp_settings_path() -> std::path::PathBuf {
