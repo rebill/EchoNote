@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import sys
 import time
@@ -11,13 +12,13 @@ from .transcriber import MlxAudioTranscriber
 from .wav import validate_wav_bytes
 
 
-DEFAULT_MODEL = "mlx-community/Qwen3-ASR-0.6B-4bit"
+DEFAULT_MODEL = "offline-asr-model-not-installed"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a real MLX Qwen3 ASR spike against one WAV file.")
     parser.add_argument("--audio", required=True, help="Path to a 16kHz mono PCM16 WAV file.")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="MLX model ID.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Absolute local MLX model directory.")
     parser.add_argument("--language", default="auto", choices=("auto", "zh", "en"), help="Input language hint.")
     parser.add_argument("--json", action="store_true", help="Print JSON result only.")
     return parser.parse_args()
@@ -25,6 +26,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    os.environ.pop("HUGGINGFACE_HUB_TOKEN", None)
+    os.environ.pop("HF_TOKEN", None)
     audio_path = Path(args.audio).expanduser().resolve()
     if not audio_path.exists():
         raise SystemExit(f"audio file does not exist: {audio_path}")

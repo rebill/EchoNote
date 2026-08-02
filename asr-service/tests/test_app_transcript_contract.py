@@ -5,6 +5,7 @@ import json
 import struct
 import unittest
 import wave
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -98,12 +99,14 @@ class TranscriptContractTest(unittest.TestCase):
         self.assertEqual(body["speakers"], [])
 
     def test_diarization_status_reports_unavailable_without_optional_dependency(self) -> None:
-        response = self.client.get("/diarization/status")
+        with patch("echonote_asr.diarization.pyannote_available", return_value=False):
+            response = self.client.get("/diarization/status")
 
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertIn(body["status"], {"available", "unavailable", "failed"})
-        self.assertEqual(body["model_id"], "pyannote/speaker-diarization-community-1")
+        self.assertEqual(body["status"], "unavailable")
+        self.assertEqual(body["model_id"], "offline-diarization-model-not-installed")
+        self.assertEqual(body["error"], "pyannote.audio is not installed")
 
     def test_finalize_with_missing_diarization_dependency_degrades(self) -> None:
         segment = {

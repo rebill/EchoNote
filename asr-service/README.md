@@ -6,13 +6,14 @@ M2 provides a runnable FastAPI service with fake local transcription. The schema
 contracts in `echonote_asr/schemas.py` remain the public API shape for the
 plugin-facing integration.
 
-M3 adds an optional `mlx-audio` backend and a standalone real-ASR spike command.
-The default service backend remains `fake` until the real model path is fully
-validated.
+The real backend loads ASR and diarization weights only from local directories.
+Companion v0.9.0 installs its dependencies and models from a verified offline bundle.
 
-## Install
+## Offline Install
 
-From this directory:
+Use EchoNote Companion and the repository-level offline bundle workflow. Companion installs with `pip --no-index`; it never upgrades pip or falls back to a package index. Python 3.11+ must already be present.
+
+For development only, an online source environment can still be prepared from this directory:
 
 ```bash
 python -m venv .venv
@@ -26,24 +27,83 @@ Optional real MLX ASR dependencies:
 pip install -e '.[mlx]'
 ```
 
-## Run
+Optional Windows CPU ASR dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[windows-cpu]"
+```
+
+## Windows Server 2016 CPU Service
+
+The Windows CPU target uses CPython 3.11.9, `faster-whisper`, and CTranslate2 INT8. It does not load CUDA or use a
+GPU. The supported launcher always binds one Uvicorn worker to `127.0.0.1`; attempts to pass another host to the
+CLI are rejected.
+
+For the packaged offline ZIP, extract it to a local NTFS directory and run these commands from Windows PowerShell
+5.1. The package already contains the model and all Windows x64 wheels:
+
+```powershell
+Set-Location C:\EchoNote\EchoNote-ASR-Windows-CPU-0.9.0-py311
+.\verify-windows-cpu.ps1
+.\install-windows-cpu.ps1 -PythonPath C:\Python311\python.exe
+.\run-windows-cpu.ps1
+```
+
+The installer accepts any Python 3.11.x patch release and rejects other Python minor versions. No package index or
+model registry is contacted during verification, installation, or startup.
+
+Create the environment from a PowerShell prompt on the server:
+
+```powershell
+Set-Location C:\EchoNote\asr-service
+C:\Python311\python.exe -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[windows-cpu]"
+```
+
+For a disconnected server, place the complete `cp311-win_amd64` wheelhouse on the machine and install without an
+index. The wheelhouse must include the build dependencies as well as every transitive runtime dependency:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install `
+  --no-index `
+  --find-links C:\EchoNote\wheelhouse `
+  --no-build-isolation `
+  -e ".[windows-cpu]"
+```
+
+The model path must be a local faster-whisper/CTranslate2 model directory containing at least `config.json` and
+`model.bin`. Start the headless service with:
+
+```powershell
+.\run-windows-cpu.ps1 `
+  -ModelPath C:\EchoNote\models\faster-whisper-small `
+  -Port 8765 `
+  -CpuThreads 0
+```
+
+`CpuThreads=0` lets CTranslate2 select its runtime default. Use a positive value after benchmarking the target CPU.
+The process emits JSON logs to standard output and can be stopped with `Ctrl+C` or `POST /shutdown`. It does not
+require EchoNote Companion, Obsidian, WebView2, or an interactive audio device.
+
+## Run Offline
 
 ```bash
-python -m echonote_asr --host 127.0.0.1 --port 8765 --model mlx-community/Qwen3-ASR-0.6B-4bit --log-level info
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m echonote_asr --host 127.0.0.1 --port 8765 --model /absolute/path/to/Qwen3-ASR-0.6B-4bit --backend mlx-audio --log-level info
 ```
 
 The installed console script is also available:
 
 ```bash
-echonote-asr --host 127.0.0.1 --port 8765 --model mlx-community/Qwen3-ASR-0.6B-4bit --log-level info
+echonote-asr --host 127.0.0.1 --port 8765 --model /absolute/path/to/Qwen3-ASR-0.6B-4bit --backend mlx-audio --log-level info
 ```
 
 CLI options:
 
-- `--host`: bind host, default `127.0.0.1`
+- `--host`: compatibility option fixed to `127.0.0.1`; all other addresses are rejected
 - `--port`: bind port, default `8765`
-- `--model`: initial model identifier, default `mlx-community/Qwen3-ASR-0.6B-4bit`
-- `--backend`: `fake` or `mlx-audio`, default `fake`
+- `--model`: absolute local model directory; remote model identifiers are rejected by the real backend
+- `--backend`: `fake`, `mlx-audio`, or `faster-whisper`, default `fake`
+- `--cpu-threads`: CPU thread budget for `faster-whisper`; `0` uses the runtime default
 - `--log-level`: one of `critical`, `error`, `warning`, `info`, `debug`
 
 Logs are emitted as JSON lines.
@@ -55,11 +115,12 @@ after inference, including failed requests, and the workspace is removed on serv
 `lock_wait_ms`, `temp_write_ms`, `inference_ms`, `cleanup_ms`, and `response_serialize_ms` for transcription.
 Finalization logs include diarization queue wait, model load, inference, assignment, merge, and cleanup durations.
 
-The real `mlx-audio` backend starts loading the configured model in the background as soon as the service starts.
+The real `mlx-audio` and `faster-whisper` backends start loading the configured model in the background as soon as
+the service starts.
 Before the model reports `ready`, EchoNote runs a bounded one-second warm-up inference so the first meeting chunk does
-not pay the cold-generation cost. API language values are mapped to the Qwen3 prompt names (`zh` -> `Chinese`,
-`en` -> `English`); `auto` keeps model-side language detection enabled. Model load logs include `load_ms`, `warmup_ms`,
-and `warmed_up`.
+not pay the cold-generation cost. MLX maps API language values to the Qwen3 prompt names (`zh` -> `Chinese`, `en` ->
+`English`); faster-whisper uses the ISO values `zh` and `en`. `auto` keeps model-side language detection enabled.
+Model load logs include `load_ms`, `warmup_ms`, and `warmed_up`.
 
 Run `.venv/bin/python benchmarks/performance_benchmark.py` for the ASR and speaker-assignment benchmarks.
 
@@ -94,7 +155,7 @@ Use a 16kHz mono PCM16 WAV file:
 ```bash
 python -m echonote_asr.spike_real_asr \
   --audio /tmp/echonote-test.wav \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
+  --model /absolute/path/to/Qwen3-ASR-0.6B-4bit \
   --language zh
 ```
 
@@ -107,7 +168,7 @@ To run the HTTP service with the real backend:
 python -m echonote_asr \
   --host 127.0.0.1 \
   --port 8765 \
-  --model mlx-community/Qwen3-ASR-0.6B-4bit \
+  --model /absolute/path/to/Qwen3-ASR-0.6B-4bit \
   --backend mlx-audio \
   --log-level info
 ```
@@ -131,7 +192,7 @@ Load a specific model:
 ```bash
 curl -X POST http://127.0.0.1:8765/model/load \
   -H 'Content-Type: application/json' \
-  -d '{"model_id":"mlx-community/Qwen3-ASR-0.6B-4bit"}'
+  -d '{"model_id":"/absolute/path/to/Qwen3-ASR-0.6B-4bit"}'
 ```
 
 Create a tiny WAV file for local testing:

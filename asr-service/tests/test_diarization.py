@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import tempfile
 import threading
 import time
 import unittest
@@ -36,13 +38,21 @@ class DiarizationAssignmentTest(unittest.TestCase):
 
         self.assertEqual(status["status"], DiarizationStatus.DISABLED)
 
-    def test_status_is_unavailable_when_token_is_missing(self) -> None:
+    def test_status_is_unavailable_when_local_model_is_missing(self) -> None:
         with patch("echonote_asr.diarization.pyannote_available", return_value=True):
-            with patch("echonote_asr.diarization.huggingface_token", return_value=""):
-                status = DiarizationState(enabled=True).status_response()
+            status = DiarizationState(enabled=True, model_id="/missing/diarization-model").status_response()
 
         self.assertEqual(status["status"], DiarizationStatus.UNAVAILABLE)
-        self.assertEqual(status["error"], "Hugging Face token is not configured")
+        self.assertIn("Offline diarization model directory was not found", status["error"])
+
+    def test_local_diarization_model_does_not_require_a_token(self) -> None:
+        with tempfile.TemporaryDirectory() as model_dir:
+            Path(model_dir, "config.yaml").write_text("pipeline: {}", encoding="utf-8")
+            with patch("echonote_asr.diarization.pyannote_available", return_value=True):
+                with patch.dict(os.environ, {}, clear=True):
+                    status = DiarizationState(enabled=True, model_id=model_dir).status_response()
+
+        self.assertEqual(status["status"], DiarizationStatus.AVAILABLE)
 
     def test_assigns_speaker_by_largest_overlap(self) -> None:
         turns = [
