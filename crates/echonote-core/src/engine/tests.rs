@@ -457,9 +457,8 @@ fn no_input_and_a_missing_mic_are_errors_but_missing_system_audio_is_not() {
         .start(options(Some(once(mono(), audio, Pace::Fast)), Some(denied)))
         .unwrap();
     let seen = until_finished(&events, Duration::from_secs(10));
-    assert!(notices(&seen).contains(&Notice::SourceFailed {
+    assert!(notices(&seen).contains(&Notice::PermissionDenied {
         track: TrackKind::Sys,
-        error: CaptureError::Denied.to_string(),
     }));
     let reader = engine.store().reader().unwrap();
     let tracks = reader.tracks(meeting).unwrap();

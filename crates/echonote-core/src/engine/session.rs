@@ -21,7 +21,9 @@ use super::{
     SessionState, SessionStats, StoreHandle, TRACK_KINDS,
 };
 use crate::SAMPLE_RATE;
-use crate::capture::{AudioSource, KeepAwake, Stamp, Timeline, TimelineConfig, now_ns};
+use crate::capture::{
+    AudioSource, CaptureError, KeepAwake, Stamp, Timeline, TimelineConfig, now_ns,
+};
 use crate::pipeline::Pipeline;
 use crate::recording::{Syncer, Writer};
 use crate::store::{MeetingStatus, NewTrack, TrackKind};
@@ -186,6 +188,16 @@ fn notify(events: &Sender<EngineEvent>, meeting: i64, notice: Notice) {
     let _ = events.send(EngineEvent::Notice { meeting, notice });
 }
 
+fn open_failed(track: TrackKind, error: &CaptureError) -> Notice {
+    match error {
+        CaptureError::Denied => Notice::PermissionDenied { track },
+        _ => Notice::SourceFailed {
+            track,
+            error: error.to_string(),
+        },
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -304,10 +316,7 @@ impl Session {
             notify(
                 &session.events,
                 meeting,
-                Notice::SourceFailed {
-                    track: TrackKind::Sys,
-                    error: error.to_string(),
-                },
+                open_failed(TrackKind::Sys, &error),
             );
         }
         session.transcriber.load();
@@ -444,14 +453,7 @@ impl Session {
                         track.retry_at = Some(now + REOPEN_EVERY);
                         if !track.failing {
                             track.failing = true;
-                            notify(
-                                &self.events,
-                                meeting,
-                                Notice::SourceFailed {
-                                    track: kind,
-                                    error: error.to_string(),
-                                },
-                            );
+                            notify(&self.events, meeting, open_failed(kind, &error));
                         }
                     }
                 }

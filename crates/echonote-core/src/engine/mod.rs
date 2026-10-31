@@ -182,6 +182,10 @@ pub enum Notice {
         track: TrackKind,
         error: String,
     },
+    /// Like `SourceFailed`, because the user denied access in system settings.
+    PermissionDenied {
+        track: TrackKind,
+    },
     /// The device went away or the default device changed; a new one is opened.
     DeviceChanged {
         track: TrackKind,

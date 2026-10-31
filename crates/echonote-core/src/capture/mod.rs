@@ -41,7 +41,7 @@ pub enum CaptureError {
     Device(String),
     #[error("unsupported sample format {0}")]
     Format(String),
-    #[error("microphone access is denied in system settings")]
+    #[error("access is denied in system settings")]
     Denied,
     #[error(transparent)]
     Wav(#[from] hound::Error),
@@ -66,8 +66,12 @@ pub trait AudioSource {
     fn dropped(&self) -> u64;
 }
 
-/// The system-audio source of this platform (Core Audio process tap, WASAPI loopback).
+/// The system-audio source of this platform (Core Audio process tap, WASAPI loopback). A
+/// denied macOS permission fails with `Denied` instead of recording silence.
 pub fn open_system() -> Result<Box<dyn AudioSource>, CaptureError> {
+    if sys_permission() == Permission::Denied {
+        return Err(CaptureError::Denied);
+    }
     #[cfg(target_os = "macos")]
     return system_macos::SystemSource::start().map(|s| Box::new(s) as Box<dyn AudioSource>);
     #[cfg(target_os = "windows")]
