@@ -278,6 +278,16 @@ WebKit 不给 Ogg 建索引，按平均码率把时间换算成字节位置，VB
 
 **安全**：严格 CSP（不加载远程脚本，不允许内联脚本）；不启用 shell 插件；capabilities 只开放用到的命令；文件访问限定在数据目录；API Key 存系统钥匙串；日志不记录转录文本和 Key；非 HTTPS 的 LLM 地址只允许 localhost，否则需要用户确认。转录可能带有提示注入（会上有人念出指令），所以 LLM 输出的 Markdown 渲染前要清理，CSP 的 `img-src` 只允许 `'self' asset: data:`，防止注入的图片链接把转录内容带出去。LLM 请求关闭重定向（reqwest 跨主机重定向时会保留 `x-api-key` 这类自定义头）。IPC 命令只接收 id，不接收文件路径。
 
+**应用壳（M2，`app/`）**：
+
+- 前端 Svelte 5 + Vite，构建产物只有外链的 JS 和 CSS。CSP 为 `default-src 'self'`，`script-src`、`style-src` 都不允许内联；动态样式只用 `style:` 指令（CSSOM 赋值，不受 CSP 限制），不用 Svelte 过渡（会插入 `<style>`）。capability 只有一个：按名字允许应用自己的命令，加上事件监听；不开放任何插件 API、文件或 shell。
+- 引擎事件由 `live` 线程合并，每 100 ms 最多发一次增量：电平取峰值，预览和通知发当前值，定稿按提交顺序。窗口在录音中打开时先订阅再取快照（定稿从库里读），按段落 id 去重。
+- 关闭窗口会销毁 WebView，应用留在托盘，内存随之释放；再次打开时按配置重建窗口（Windows 上不能在事件回调里同步建窗口，所以放到线程里）。最后一个窗口关闭触发的退出请求被拦下；退出只走自己的 Quit（托盘和 macOS 应用菜单），先结束录音再退出。
+- 设置作为一个 JSON 存在库的 `settings` 表；全局快捷键默认 `CmdOrCtrl+Shift+Alt+R`，注册失败时保留旧的并提示。
+- 权限：麦克风在开始录音前询问；macOS 系统音频没有公开的查询接口，用 `TCCAccessPreflight` 判断，拒绝时不建 Tap，只录麦克风并提示去系统设置；Windows 读麦克风隐私开关，关着时拒绝开始录音。
+- 日志在 `<数据目录>/logs/app.log`，1 MB 轮转，只记录事件类型和错误码。
+- 调试构建的开关：`ECHONOTE_DATA_DIR`、`ECHONOTE_FAKE_INPUT`、`ECHONOTE_SMOKE`。`scripts/dev/app_smoke.sh` 把合成会议的前 45 s 通过真实界面走一遍：开始到采集 292 ms，无 CSP 违规，每秒 8.8 次增量，13 段里 3 段串音隐藏，显示说话方标签，日志里没有转录文本。
+
 **测试与 CI**：
 
 - core 单元测试使用假源和 WAV 源；性质测试检查定稿单调、不重叠、不丢音频。

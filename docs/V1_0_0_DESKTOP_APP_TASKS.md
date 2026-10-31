@@ -95,15 +95,17 @@ Acceptance targets:
 
 ## M2 App Shell And Recording
 
-- [ ] Tauri 2 app (`app/`) with Svelte 5 + TypeScript + Vite; strict CSP and least-privilege capabilities.
-- [ ] Meeting list with search; meeting detail with Summary, Transcript, Q&A tabs.
-- [ ] Recording view: timer, per-track meters, live transcript (grey previews, final text), pause/resume/stop.
-- [ ] Virtualized transcript list; IPC deltas batched to at most 10 Hz.
-- [ ] Tray/menu bar and global shortcut; single instance.
-- [ ] macOS permission flow for microphone and system audio; Windows microphone privacy guidance.
-- [ ] Auto-stop on silence; device hot switch; prevent sleep while recording.
-- [ ] Hide speaker labels when the sys track has no speech.
-- [ ] zh-CN and en UI strings.
+- [x] Tauri 2 app (`app/`) with Svelte 5 + TypeScript + Vite; strict CSP and least-privilege capabilities (no inline scripts or styles; one capability: the app's commands by name plus event listen).
+- [x] Meeting list with search; meeting detail with Summary, Transcript, Q&A tabs (Summary and Q&A are placeholders until M4).
+- [x] Recording view: timer, per-track meters, live transcript (grey previews, final text), pause/resume/stop.
+- [x] Virtualized transcript list; IPC deltas batched to at most 10 Hz (smoke run: 8.8 deltas/s, p5 gap 101 ms).
+- [x] Tray/menu bar and global shortcut; single instance.
+- [x] macOS permission flow for microphone and system audio; Windows microphone privacy guidance (system audio status through TCC preflight; Windows reads the privacy switches).
+- [x] Auto-stop on silence; device hot switch; prevent sleep while recording.
+- [x] Hide speaker labels when the sys track has no speech.
+- [x] zh-CN and en UI strings.
+- [x] Debug smoke run with fake input through the real UI (`scripts/dev/app_smoke.sh`).
+- [ ] Packaged-app run on real devices: permission prompts, tray, shortcut, device switching, live budgets with a meeting client running (PRD A1, A2, A4, A5, A8, A9). macOS needs the user at the machine for the prompts; Windows needs a Windows machine.
 
 Acceptance targets:
 
