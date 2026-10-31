@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/echonote-core", "crates/echonote-bench", "crates/echonote-opus"]
+members = ["crates/echonote-core", "crates/echonote-bench", "crates/echonote-opus", "app/src-tauri"]
+# `cargo test` without --workspace skips the app, which needs `pnpm build` (app/dist) first.
+default-members = ["crates/echonote-core", "crates/echonote-bench", "crates/echonote-opus"]
 
 [workspace.package]
 version = "1.0.0-alpha.0"

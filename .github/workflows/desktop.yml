@@ -66,6 +66,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -77,6 +89,15 @@ jobs:
 
       - name: Fetch sherpa-onnx archive
         run: python scripts/dev/fetch_sherpa_onnx.py .sherpa-onnx ${{ matrix.target }}
+
+      # The app crate embeds app/dist, so the frontend is built before any cargo step.
+      - name: Frontend
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm test
+          pnpm build
 
       - name: Format
         run: cargo fmt --all --check

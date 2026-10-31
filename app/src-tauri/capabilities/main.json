@@ -1,0 +1,28 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The main window: app commands by name and event listening; no plugin APIs, files or shell.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-app-info",
+    "allow-list-meetings",
+    "allow-search",
+    "allow-get-meeting",
+    "allow-rename-meeting",
+    "allow-start-recording",
+    "allow-stop-recording",
+    "allow-pause-recording",
+    "allow-resume-recording",
+    "allow-live-snapshot",
+    "allow-get-settings",
+    "allow-set-settings",
+    "allow-list-input-devices",
+    "allow-permissions",
+    "allow-open-privacy-settings",
+    "allow-smoke-report"
+  ]
+}
