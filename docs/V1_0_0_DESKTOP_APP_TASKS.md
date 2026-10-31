@@ -65,7 +65,7 @@ Acceptance targets:
 - [ ] CI gates use a fixed decode-cost model.
 - [x] ASR scheduler: single worker, finals before previews, one preview slot shared by both tracks, adaptive preview interval.
 - [ ] Skip mic previews during suspected bleed (system-audio priority is the stand-in until dedup lands).
-- [ ] Port `live_demo` onto `echonote_core::pipeline`.
+- [x] Port `live_demo` onto `echonote_core::pipeline`.
 - [ ] ASR backlog spill: past about 60 s, drop in-memory PCM and transcribe the range later from the Ogg file.
 - [x] Keep token timestamps from `OfflineAsr::decode` (`decode_transcript`).
 - [ ] AEC3 spike in week 1: ERLE on a clean speaker-only recording; reserve a bounded look-behind stage for mic processing.

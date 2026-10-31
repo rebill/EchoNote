@@ -63,12 +63,6 @@ impl VadSpec {
     }
 }
 
-/// A finished speech segment on the input timeline.
-pub struct Segment {
-    pub start_sample: u64,
-    pub samples: Vec<f32>,
-}
-
 pub struct Vad {
     detector: VoiceActivityDetector,
     window_size: usize,
@@ -130,20 +124,6 @@ impl Vad {
     /// Whether the most recent window was classified as speech.
     pub fn in_speech(&self) -> bool {
         self.detector.detected()
-    }
-
-    /// Pop the oldest finished segment, if any.
-    pub fn pop_segment(&self) -> Option<Segment> {
-        if self.detector.is_empty() {
-            return None;
-        }
-        let segment = self.detector.front()?;
-        let result = Segment {
-            start_sample: segment.start() as u64,
-            samples: segment.samples().to_vec(),
-        };
-        self.detector.pop();
-        Some(result)
     }
 
     /// Close the open segment, at end of input or to bound the buffer. The model state is

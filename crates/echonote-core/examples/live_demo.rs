@@ -1,8 +1,9 @@
 //! Live transcription demo in the terminal: the microphone is "我", system audio is "对方".
 //!
-//! Same pipeline shape as the planned engine: per-track Silero VAD with a 12 s hard cap, one
-//! SenseVoice worker serving both tracks (finals first, at most one queued preview per track),
-//! and mic finals that repeat what system audio just played are marked as crosstalk.
+//! Drives `echonote_core::pipeline` the way the app will: per-track Silero VAD with a 12 s
+//! hard cap, one SenseVoice worker serving both tracks (finals first, one preview slot shared
+//! by both tracks with system audio first), and mic finals that repeat what system audio just
+//! played are marked as crosstalk.
 //!
 //! macOS: run through `scripts/dev/live_demo.sh`. Writes mic.wav, sys.wav (16 kHz) and
 //! transcript.jsonl to `<out_dir>` and stops when `<out_dir>/stop` appears. Windows loopback
@@ -24,31 +25,34 @@ mod demo {
     use std::fs::File;
     use std::io::{BufWriter, Write};
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::mpsc::{self, Sender};
-    use std::sync::{Arc, Condvar, Mutex};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::time::{Duration, Instant};
 
     use anyhow::{Context, Result};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use echonote_core::asr::{ModelKind, OfflineAsr, OfflineModelSpec};
-    use echonote_core::vad::{Vad, VadKind, VadSpec};
+    use echonote_core::asr::{ModelKind, OfflineAsr, OfflineModelSpec, Transcript};
+    use echonote_core::pipeline::{
+        Job, Output, Pipeline, PipelineConfig, SherpaDetector, SpeechDetector,
+    };
+    use echonote_core::vad::{VadKind, VadSpec};
     use rtrb::{Consumer, RingBuffer};
     use serde_json::json;
     use sherpa_onnx::LinearResampler;
 
     const SR: usize = 16_000;
     const RING: usize = 1 << 22;
-    const HARD_CAP: usize = SR * 12;
-    const SPLIT_SEARCH: usize = SR * 2;
-    const SPLIT_FRAME: usize = SR / 50;
-    const MIN_SEGMENT: usize = SR / 4;
-    const MIN_PREVIEW: usize = SR * 3 / 10;
-    const PREVIEW_INTERVAL: Duration = Duration::from_millis(600);
+    const HARD_CAP_S: f64 = 12.0;
+    /// SenseVoice has token timestamps, so forced cuts can overlap.
+    const OVERLAP_S: f64 = 0.2;
+    /// Capture is drained this often; decoder results wake the loop sooner.
+    const TICK: Duration = Duration::from_millis(30);
     /// How long a mic final may wait for the system track to confirm or rule out crosstalk.
     const MIC_WAIT: Duration = Duration::from_secs(3);
     const MIC: usize = 0;
     const SYS: usize = 1;
+
     /// One capture source: an audio callback feeding a lock-free ring.
     struct Source {
         _guard: Box<dyn std::any::Any>,
@@ -196,35 +200,19 @@ mod demo {
         })
     }
 
-    struct Job {
-        track: usize,
-        start: usize,
-        samples: Vec<f32>,
-    }
-    /// Work for the single decoder: finals in order, plus the newest preview of each track.
-    #[derive(Default)]
-    struct Queue {
-        finals: VecDeque<Job>,
-        previews: [Option<Job>; 2],
-        stop: bool,
-    }
-
-    type Shared = Arc<(Mutex<Queue>, Condvar)>;
-
     enum Event {
         Loaded(f64),
         LoadFailed(String),
         Decoded {
-            track: usize,
-            start: usize,
-            len: usize,
-            is_final: bool,
-            text: String,
+            job: Job,
+            transcript: Transcript,
             decode_s: f64,
         },
     }
 
-    fn worker(spec: OfflineModelSpec, shared: Shared, events: Sender<Event>) {
+    /// The single decoder thread. The pipeline lives on the main thread and hands it one job
+    /// at a time; the job travels back with its transcript.
+    fn worker(spec: OfflineModelSpec, jobs: Receiver<Job>, events: Sender<Event>) {
         let started = Instant::now();
         let asr = match OfflineAsr::load(&spec) {
             Ok(asr) => asr,
@@ -234,38 +222,13 @@ mod demo {
             }
         };
         let _ = events.send(Event::Loaded(started.elapsed().as_secs_f64()));
-        let mut next_preview = 0;
-        loop {
-            let (job, is_final) = {
-                let (lock, ready) = &*shared;
-                let mut queue = lock.lock().unwrap();
-                loop {
-                    if let Some(job) = queue.finals.pop_front() {
-                        break (job, true);
-                    }
-                    let slot = (0..2)
-                        .map(|offset| (next_preview + offset) % 2)
-                        .find(|&i| queue.previews[i].is_some());
-                    if let Some(slot) = slot.filter(|_| !queue.stop) {
-                        next_preview = slot + 1;
-                        break (queue.previews[slot].take().unwrap(), false);
-                    }
-                    if queue.stop {
-                        return;
-                    }
-                    queue = ready.wait(queue).unwrap();
-                }
-            };
+        for job in jobs {
             let started = Instant::now();
-            let text = strip_tags(&asr.decode(&job.samples));
+            let transcript = asr.decode_transcript(&job.samples);
             let decode_s = started.elapsed().as_secs_f64();
-            let len = job.samples.len();
             let event = Event::Decoded {
-                track: job.track,
-                start: job.start,
-                len,
-                is_final,
-                text,
+                job,
+                transcript,
                 decode_s,
             };
             if events.send(event).is_err() {
@@ -273,30 +236,23 @@ mod demo {
             }
         }
     }
-    /// One track on its own 16 kHz sample clock. `audio` holds samples from index `base`.
+
+    /// One capture track on its own 16 kHz sample clock.
     struct Track {
-        index: usize,
         source: Source,
         resampler: Option<LinearResampler>,
-        vad: Vad,
-        window: usize,
-        preroll: usize,
-        audio: Vec<f32>,
-        base: usize,
-        fed: usize,
-        committed: usize,
-        speech_start: Option<usize>,
-        last_preview: Instant,
-        preview_interval: Duration,
-        preview: String,
-        finals_in_flight: usize,
+        /// Samples received so far.
+        received: usize,
         /// Session time of sample 0, set when the first samples arrive.
         offset_s: Option<f64>,
+        /// Latest preview of the current utterance.
+        preview: String,
+        preview_utterance: u64,
         wav: hound::WavWriter<BufWriter<File>>,
     }
 
     impl Track {
-        fn new(index: usize, source: Source, spec: &VadSpec, wav: &Path) -> Result<Self> {
+        fn new(source: Source, wav: &Path) -> Result<Self> {
             let resampler = if source.rate as usize == SR {
                 None
             } else {
@@ -312,46 +268,29 @@ mod demo {
                 sample_format: hound::SampleFormat::Int,
             };
             Ok(Self {
-                index,
                 source,
                 resampler,
-                vad: Vad::create(spec)?,
-                window: spec.window_size(),
-                preroll: 2 * spec.window_size() + (spec.min_speech_s * SR as f32) as usize,
-                audio: Vec::new(),
-                base: 0,
-                fed: 0,
-                committed: 0,
-                speech_start: None,
-                last_preview: Instant::now(),
-                preview_interval: PREVIEW_INTERVAL,
-                preview: String::new(),
-                finals_in_flight: 0,
+                received: 0,
                 offset_s: None,
+                preview: String::new(),
+                preview_utterance: 0,
                 wav: hound::WavWriter::create(wav, wav_spec)?,
             })
-        }
-        fn total(&self) -> usize {
-            self.base + self.audio.len()
-        }
-
-        fn slice(&self, start: usize, end: usize) -> &[f32] {
-            &self.audio[start - self.base..end - self.base]
         }
 
         fn seconds_at(&self, sample: usize) -> f64 {
             self.offset_s.unwrap_or(0.0) + sample as f64 / SR as f64
         }
 
-        /// Drain the ring, downmix, resample to 16 kHz, append and save.
-        fn pull(&mut self, session: Instant) -> Result<()> {
+        /// Drain the ring, downmix and resample to 16 kHz.
+        fn pull(&mut self, session: Instant) -> Vec<f32> {
             let channels = self.source.channels;
             let available = self.source.samples.slots() / channels * channels;
             if available == 0 {
-                return Ok(());
+                return Vec::new();
             }
             let Ok(chunk) = self.source.samples.read_chunk(available) else {
-                return Ok(());
+                return Vec::new();
             };
             let (first, second) = chunk.as_slices();
             let interleaved: Vec<f32> = first.iter().chain(second).copied().collect();
@@ -369,152 +308,102 @@ mod demo {
                 let elapsed = session.elapsed().saturating_sub(captured);
                 self.offset_s = Some(elapsed.as_secs_f64());
             }
-            let samples = match &self.resampler {
+            match &self.resampler {
                 Some(resampler) => resampler.resample(&mono, false),
                 None => mono,
-            };
-            for sample in &samples {
+            }
+        }
+
+        /// Save 16 kHz samples and count them.
+        fn save(&mut self, samples: &[f32]) -> Result<()> {
+            for sample in samples {
                 self.wav
                     .write_sample((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
             }
-            self.audio.extend_from_slice(&samples);
-            // Keep only what an open utterance or the next onset can still reach.
-            let keep = self
-                .speech_start
-                .unwrap_or(usize::MAX)
-                .min(self.fed.saturating_sub(self.preroll));
-            if keep > self.base + SR * 30 {
-                self.audio.drain(..keep - self.base);
-                self.base = keep;
+            self.received += samples.len();
+            Ok(())
+        }
+    }
+
+    /// The pipeline and its tracks, owned by the main thread.
+    struct Engine {
+        pipeline: Pipeline,
+        tracks: [Track; 2],
+        jobs: Sender<Job>,
+        started: Instant,
+        loaded: bool,
+        busy: bool,
+    }
+
+    impl Engine {
+        fn now_s(&self) -> f64 {
+            self.started.elapsed().as_secs_f64()
+        }
+
+        /// Move captured audio into the pipeline.
+        fn pull(&mut self) -> Result<()> {
+            for index in [MIC, SYS] {
+                let samples = self.tracks[index].pull(self.started);
+                self.push(index, &samples)?;
             }
             Ok(())
         }
-        /// Feed whole VAD windows; queue finals at pauses and at the hard cap; request previews.
-        fn step(&mut self, shared: &Shared) {
-            while self.fed + self.window <= self.total() {
-                let end = self.fed + self.window;
-                self.vad.accept_window(self.slice(self.fed, end));
-                self.fed = end;
-                if self.vad.in_speech() && self.speech_start.is_none() {
-                    self.speech_start =
-                        Some(self.fed.saturating_sub(self.preroll).max(self.committed));
-                }
-                self.collect(shared);
-                if !self.vad.in_speech() {
-                    self.end_utterance(shared);
-                }
-                self.force_split(shared);
+
+        fn push(&mut self, index: usize, samples: &[f32]) -> Result<()> {
+            if samples.is_empty() {
+                return Ok(());
             }
-            self.request_preview(shared);
+            self.tracks[index].save(samples)?;
+            let now_s = self.now_s();
+            self.pipeline.push(index, samples, now_s);
+            let utterance = self.pipeline.utterance(index);
+            let track = &mut self.tracks[index];
+            if track.preview_utterance != utterance {
+                track.preview_utterance = utterance;
+                track.preview.clear();
+            }
+            Ok(())
         }
 
-        /// Queue VAD segments, minus anything a forced split already emitted.
-        fn collect(&mut self, shared: &Shared) {
-            while let Some(segment) = self.vad.pop_segment() {
-                let vad_start = segment.start_sample as usize;
-                let end = vad_start + segment.samples.len();
-                let skip = self
-                    .committed
-                    .saturating_sub(vad_start)
-                    .min(segment.samples.len());
-                if segment.samples.len() - skip >= MIN_SEGMENT {
-                    self.queue_final(shared, vad_start + skip, segment.samples[skip..].to_vec());
-                }
-                self.committed = self.committed.max(end);
-                let continues = self.vad.in_speech();
-                self.end_utterance(shared);
-                if continues {
-                    self.speech_start = Some(end);
-                }
-            }
-        }
-
-        /// sherpa's max_speech_duration does not split continuous speech, so cut at the
-        /// quietest 20 ms frame of the last 2 s once an utterance reaches the cap.
-        fn force_split(&mut self, shared: &Shared) {
-            let Some(start) = self.speech_start else {
-                return;
-            };
-            if self.fed - start < HARD_CAP {
+        /// Give the idle decoder the next job. Nothing is sent while the model loads, so
+        /// finals wait in the pipeline and previews are built from the newest audio later.
+        fn dispatch(&mut self) {
+            if !self.loaded || self.busy {
                 return;
             }
-            let mut cut = (f32::INFINITY, self.fed);
-            let mut position = self
-                .fed
-                .saturating_sub(SPLIT_SEARCH)
-                .max(start + MIN_SEGMENT);
-            while position + SPLIT_FRAME <= self.fed {
-                let energy: f32 = self
-                    .slice(position, position + SPLIT_FRAME)
-                    .iter()
-                    .map(|s| s * s)
-                    .sum();
-                if energy < cut.0 {
-                    cut = (energy, position + SPLIT_FRAME / 2);
-                }
-                position += SPLIT_FRAME;
-            }
-            let cut = cut.1;
-            let samples = self.slice(start, cut).to_vec();
-            self.queue_final(shared, start, samples);
-            self.committed = cut;
-            self.end_utterance(shared);
-            self.speech_start = Some(cut);
-        }
-        fn queue_final(&mut self, shared: &Shared, start: usize, samples: Vec<f32>) {
-            let (lock, ready) = &**shared;
-            lock.lock().unwrap().finals.push_back(Job {
-                track: self.index,
-                start,
-                samples,
-            });
-            ready.notify_one();
-            self.finals_in_flight += 1;
-        }
-
-        fn end_utterance(&mut self, shared: &Shared) {
-            if self.speech_start.take().is_some() {
-                shared.0.lock().unwrap().previews[self.index] = None;
-                self.preview.clear();
+            let now_s = self.now_s();
+            if let Some(job) = self.pipeline.next_job(now_s) {
+                self.busy = self.jobs.send(job).is_ok();
             }
         }
 
-        /// Re-decode the growing utterance; the interval adapts to twice the last decode time.
-        fn request_preview(&mut self, shared: &Shared) {
-            let Some(start) = self.speech_start else {
-                return;
-            };
-            if self.fed - start < MIN_PREVIEW || self.last_preview.elapsed() < self.preview_interval
-            {
-                return;
+        fn sys_now(&self) -> SysNow {
+            let sys = &self.tracks[SYS];
+            let region = self.pipeline.region(SYS);
+            SysNow {
+                busy: region.is_some() || self.pipeline.pending_finals_of(SYS) > 0,
+                preview_start_s: region.map(|region| sys.seconds_at(region.span_start)),
+                preview: sys.preview.clone(),
             }
-            self.last_preview = Instant::now();
-            let job = Job {
-                track: self.index,
-                start,
-                samples: self.slice(start, self.fed).to_vec(),
-            };
-            let (lock, ready) = &**shared;
-            lock.lock().unwrap().previews[self.index] = Some(job);
-            ready.notify_one();
         }
 
-        fn finish(&mut self, shared: &Shared) -> Result<()> {
-            if let Some(resampler) = &self.resampler {
-                let tail = resampler.resample(&[], true);
-                self.audio.extend_from_slice(&tail);
+        /// End of capture: flush the resamplers, close open utterances, decode what is left.
+        fn finish(&mut self, events: &Receiver<Event>, session: &mut Session) -> Result<()> {
+            self.pull()?;
+            for index in [MIC, SYS] {
+                let tail = match &self.tracks[index].resampler {
+                    Some(resampler) => resampler.resample(&[], true),
+                    None => Vec::new(),
+                };
+                self.push(index, &tail)?;
             }
-            self.step(shared);
-            self.vad.flush();
-            self.collect(shared);
-            if let Some(start) = self
-                .speech_start
-                .filter(|start| self.fed - start >= MIN_SEGMENT)
-            {
-                let samples = self.slice(start, self.fed).to_vec();
-                self.queue_final(shared, start, samples);
+            let now_s = self.now_s();
+            self.pipeline.finish(now_s);
+            while self.pipeline.pending_finals() > 0 {
+                self.dispatch();
+                let event = events.recv().context("decoder stopped")?;
+                handle(event, self, session)?;
             }
-            self.end_utterance(shared);
             Ok(())
         }
     }
@@ -766,63 +655,54 @@ mod demo {
         PathBuf::from(home).join(".cache").join("echonote-dev")
     }
 
-    fn sys_now(track: &Track) -> SysNow {
-        SysNow {
-            busy: track.speech_start.is_some() || track.finals_in_flight > 0,
-            preview_start_s: track.speech_start.map(|start| track.seconds_at(start)),
-            preview: track.preview.clone(),
-        }
-    }
-    /// Apply one decoder event; returns true when the model has just loaded.
-    fn handle(event: Event, tracks: &mut [Track], session: &mut Session) -> Result<bool> {
-        let (track, start, len, is_final, text, decode_s) = match event {
+    /// Apply one decoder event.
+    fn handle(event: Event, engine: &mut Engine, session: &mut Session) -> Result<()> {
+        let (job, transcript, decode_s) = match event {
             Event::Loaded(seconds) => {
+                engine.loaded = true;
                 session.say(&format!(
                     "模型加载完成（{seconds:.1} s），开始转录。按 Ctrl+C 结束。\n"
                 ));
-                return Ok(true);
+                return Ok(());
             }
             Event::LoadFailed(error) => anyhow::bail!("加载模型失败：{error}"),
             Event::Decoded {
-                track,
-                start,
-                len,
-                is_final,
-                text,
+                job,
+                transcript,
                 decode_s,
-            } => (track, start, len, is_final, text, decode_s),
+            } => (job, transcript, decode_s),
         };
+        engine.busy = false;
         session.busy_s += decode_s;
-        let current = &mut tracks[track];
-        if !is_final {
-            if current.speech_start == Some(start) {
-                current.preview = text;
+        match engine.pipeline.complete(job, transcript, decode_s) {
+            Some(Output::Preview { track, text, .. }) => {
+                engine.tracks[track].preview = strip_tags(&text);
             }
-            current.preview_interval =
-                PREVIEW_INTERVAL.max(Duration::from_secs_f64(2.0 * decode_s));
-            return Ok(false);
+            Some(Output::Final { track, cut, text }) => {
+                let text = strip_tags(&text);
+                if text.is_empty() {
+                    return Ok(());
+                }
+                let current = &engine.tracks[track];
+                let end_s = current.seconds_at(cut.span_end);
+                let line = Line {
+                    track,
+                    start_s: current.seconds_at(cut.span_start),
+                    end_s,
+                    text,
+                    latency_s: (current.seconds_at(current.received) - end_s).max(0.0),
+                    arrived: Instant::now(),
+                };
+                if track == SYS {
+                    session.emit(line, false)?;
+                } else {
+                    session.pending_mic.push_back(line);
+                }
+            }
+            // The utterance ended or was cut while its preview decoded.
+            None => {}
         }
-        current.finals_in_flight -= 1;
-        if text.is_empty() {
-            return Ok(false);
-        }
-        let start_s = current.seconds_at(start);
-        let end_s = current.seconds_at(start + len);
-        let available_s = current.seconds_at(current.total());
-        let line = Line {
-            track,
-            start_s,
-            end_s,
-            text,
-            latency_s: (available_s - end_s).max(0.0),
-            arrived: Instant::now(),
-        };
-        if track == SYS {
-            session.emit(line, false)?;
-        } else {
-            session.pending_mic.push_back(line);
-        }
-        Ok(false)
+        Ok(())
     }
 
     pub fn run() -> Result<()> {
@@ -847,12 +727,9 @@ mod demo {
 
         // Start loading the model first; audio is buffered while it loads.
         let spec = OfflineModelSpec::new(ModelKind::SenseVoice, model_dir);
-        let shared: Shared = Arc::default();
+        let (jobs, job_queue) = mpsc::channel();
         let (events, received) = mpsc::channel();
-        let decoder = {
-            let shared = shared.clone();
-            std::thread::spawn(move || worker(spec, shared, events))
-        };
+        let decoder = std::thread::spawn(move || worker(spec, job_queue, events));
         let tty = match std::env::var_os("ECHONOTE_DEMO_TTY") {
             Some(path) => match std::fs::OpenOptions::new().write(true).open(&path) {
                 Ok(file) => {
@@ -904,53 +781,57 @@ mod demo {
         session.say(&format!("系统音频：{}（{} Hz）", system.name, system.rate));
         let vad_spec =
             VadSpec::meeting(VadKind::Silero, models.join("vad").join("silero_vad.onnx"));
-        let mut tracks = [
-            Track::new(MIC, mic, &vad_spec, &out_dir.join("mic.wav"))?,
-            Track::new(SYS, system, &vad_spec, &out_dir.join("sys.wav"))?,
+        let detectors: Vec<Box<dyn SpeechDetector>> = vec![
+            Box::new(SherpaDetector::new(&vad_spec)?),
+            Box::new(SherpaDetector::new(&vad_spec)?),
         ];
+        let config = PipelineConfig {
+            // Through speakers the mic mostly hears the other side again.
+            priority_track: Some(SYS),
+            ..PipelineConfig::meeting(HARD_CAP_S, OVERLAP_S)
+        };
+        let mut engine = Engine {
+            pipeline: Pipeline::new(config, detectors),
+            tracks: [
+                Track::new(mic, &out_dir.join("mic.wav"))?,
+                Track::new(system, &out_dir.join("sys.wav"))?,
+            ],
+            jobs,
+            started,
+            loaded: false,
+            busy: false,
+        };
 
         let stop_file = out_dir.join("stop");
         let deadline = started + Duration::from_secs(max_minutes * 60);
-        let mut loaded = false;
-        session.update_status(loaded, false, ["", ""]);
+        session.update_status(false, false, ["", ""]);
         while !stop_file.exists() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(30));
-            for track in tracks.iter_mut() {
-                track.pull(started)?;
-                track.step(&shared);
+            match received.recv_timeout(TICK) {
+                Ok(event) => handle(event, &mut engine, &mut session)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => anyhow::bail!("decoder stopped"),
             }
             while let Ok(event) = received.try_recv() {
-                loaded |= handle(event, &mut tracks, &mut session)?;
+                handle(event, &mut engine, &mut session)?;
             }
-            session.release_mic(&sys_now(&tracks[SYS]), false)?;
-            let sys_speaking = tracks[SYS].speech_start.is_some();
-            session.update_status(
-                loaded,
-                sys_speaking,
-                [&tracks[MIC].preview, &tracks[SYS].preview],
-            );
+            engine.pull()?;
+            engine.dispatch();
+            session.release_mic(&engine.sys_now(), false)?;
+            let sys_speaking = engine.pipeline.region(SYS).is_some();
+            let [mic, sys] = &engine.tracks;
+            session.update_status(engine.loaded, sys_speaking, [&mic.preview, &sys.preview]);
         }
 
-        for track in tracks.iter_mut() {
-            track.pull(started)?;
-            track.finish(&shared)?;
-        }
-        {
-            let (lock, ready) = &*shared;
-            let mut queue = lock.lock().unwrap();
-            queue.stop = true;
-            ready.notify_all();
-        }
         session.status = "正在转写剩余音频…".to_owned();
         session.draw_status();
-        for event in received.iter() {
-            handle(event, &mut tracks, &mut session)?;
-        }
-        session.release_mic(&sys_now(&tracks[SYS]), true)?;
+        engine.finish(&received, &mut session)?;
+        session.release_mic(&engine.sys_now(), true)?;
+        let Engine { tracks, jobs, .. } = engine;
+        drop(jobs);
         let _ = decoder.join();
         let audio_s = tracks
             .iter()
-            .map(|track| track.total() as f64 / SR as f64)
+            .map(|track| track.received as f64 / SR as f64)
             .fold(0.0, f64::max);
         let mut latencies = session.latencies.clone();
         latencies.sort_by(f64::total_cmp);
