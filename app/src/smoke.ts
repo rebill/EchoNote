@@ -1,10 +1,11 @@
 // Debug smoke run (ECHONOTE_SMOKE, scripts/dev/app_smoke.sh): record the fake input through
 // the real UI, check what was rendered and hand a report to Rust, which writes it and quits.
 
+import { ai } from "./lib/ai.svelte";
 import { app } from "./lib/app.svelte";
 import { cspViolations } from "./lib/csp";
 import { api, asCommandError, events } from "./lib/ipc";
-import type { MeetingDetail } from "./lib/types";
+import type { MeetingDetail, ProviderInput } from "./lib/types";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -97,11 +98,114 @@ async function checkExportAndDelete(meeting: number): Promise<Record<string, unk
   return result;
 }
 
+function provider(baseUrl: string, model: string, apiKey: string | null, id: string | null = null): ProviderInput {
+  return {
+    id,
+    name: "Smoke",
+    preset: "custom",
+    api: "openAi",
+    baseUrl,
+    model,
+    contextTokens: 32_000,
+    maxOutputTokens: 2_048,
+    proxy: null,
+    allowHttp: false,
+    apiKey,
+    headers: [],
+  };
+}
+
+/// Sets up the mock server as the provider (a wrong key must fail first) and turns on live
+/// highlights before recording.
+async function checkAiSetup(baseUrl: string): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  result.badKey = await api.testProvider(provider(baseUrl, "smoke-model", "wrong")).then(
+    () => "passed",
+    (error) => asCommandError(error).code,
+  );
+  await api.testProvider(provider(baseUrl, "smoke-model", "smoke-key"));
+  result.tested = true;
+  result.models = (await api.listModels(provider(baseUrl, "smoke-model", "smoke-key"))).length;
+  ai.settings = await api.saveProvider(provider(baseUrl, "smoke-model", "smoke-key"));
+  result.active = ai.active?.model ?? null;
+  result.local = ai.active?.local ?? null;
+  await ai.setLiveHighlights(true, null);
+  result.liveHighlights = ai.settings?.liveHighlights ?? false;
+  return result;
+}
+
+const tab = (index: number) => document.querySelectorAll<HTMLButtonElement>(".detail [role=tab]")[index];
+
+/// Notes (with the automatic title and a citation that seeks), a cancelled run, a question,
+/// and LLM correction with keep and undo. Booleans and counts only.
+async function checkAi(meeting: number, baseUrl: string): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  tab(0)?.click();
+  await sleep(200);
+  document.querySelector<HTMLButtonElement>(".detail .generate")?.click();
+  result.notesShown = await until(() => !!document.querySelector(".detail .notes:not(.streaming) h3"), 20_000);
+  result.noteCitations = document.querySelectorAll(".detail .notes .cite").length;
+  const detail = await api.getMeeting(meeting);
+  result.notesSaved = !!detail.notes;
+  result.titled = detail.meeting.title === "冒烟测试会议";
+  const player = document.querySelector<HTMLAudioElement>(".detail audio.player");
+  const cite = document.querySelector<HTMLButtonElement>(".detail .notes button.cite");
+  if (player && cite) {
+    player.muted = true;
+    cite.click();
+    result.citationPlays = await until(() => !player.paused && player.currentTime > 0, 10_000);
+    player.pause();
+  }
+
+  // A slow model, stopped while it streams; the saved notes stay.
+  const id = ai.active!.id;
+  ai.settings = await api.saveProvider(provider(baseUrl, "slow", null, id));
+  document.querySelector<HTMLButtonElement>(".detail .generate")?.click();
+  result.streamed = await until(() => !!document.querySelector(".detail .notes.streaming"), 10_000);
+  await until(() => !!document.querySelector<HTMLButtonElement>(".detail .stop-notes:not([disabled])"), 5_000);
+  document.querySelector<HTMLButtonElement>(".detail .stop-notes")?.click();
+  result.cancelled = await until(() => ai.run(meeting, "notes") == null, 10_000);
+  result.notesKept = !!document.querySelector(".detail .notes:not(.streaming) h3");
+  ai.settings = await api.saveProvider(provider(baseUrl, "smoke-model", null, id));
+
+  tab(2)?.click();
+  await sleep(200);
+  const input = document.querySelector<HTMLInputElement>(".detail .question-input");
+  if (input) {
+    input.value = "冒烟测试问题";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(50);
+    document.querySelector<HTMLButtonElement>(".detail .ask-button")?.click();
+    result.answerShown = await until(
+      () => !!document.querySelector(".detail .turn:not(.pending) .answer button.cite"),
+      20_000,
+    );
+    result.qaSaved = (await api.getMeeting(meeting)).qa.length;
+  }
+
+  tab(1)?.click();
+  await sleep(200);
+  document.querySelector<HTMLButtonElement>(".detail .run-correct")?.click();
+  result.corrected = await until(() => document.querySelectorAll(".detail .row .corrected ins").length > 0, 20_000);
+  result.pending = (await api.getMeeting(meeting)).corrections.length;
+  document.querySelector<HTMLButtonElement>(".detail .row .keep")?.click();
+  await until(() => document.querySelectorAll(".detail .row .corrected").length === (result.pending as number) - 1, 5_000);
+  document.querySelector<HTMLButtonElement>(".detail .row .undo")?.click();
+  await until(() => document.querySelectorAll(".detail .row .corrected").length === (result.pending as number) - 2, 5_000);
+  const after = await api.getMeeting(meeting);
+  result.leftToReview = after.corrections.length;
+  result.kept = after.segments.filter((segment) => segment.text.endsWith("SMOKEFIX")).length;
+  result.highlightsSaved = !!after.highlights;
+  return result;
+}
+
 export async function run(): Promise<void> {
   const report: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const deltaTimes: number[] = [];
   const unlisten = await events.live(() => deltaTimes.push(performance.now()));
+  const llm = app.info?.smokeLlm ?? null;
   try {
+    if (llm) report.aiSetup = await checkAiSetup(llm);
     const started = performance.now();
     await api.startRecording();
     report.startMs = Math.round(performance.now() - started);
@@ -109,6 +213,12 @@ export async function run(): Promise<void> {
     report.firstSegment = await until(() => (app.live?.segments.length ?? 0) > 0, 60_000);
     report.renderedRowsDuringRecording = document.querySelectorAll(".live .row").length;
     report.levelsSeen = (app.live?.levels ?? [0, 0]).some((level) => level > 0) || deltaTimes.length > 0;
+    if (llm) {
+      report.liveHighlightsShown = await until(
+        () => !!document.querySelector(".live .highlights .bullets li"),
+        60_000,
+      );
+    }
     // The fake input ends on its own; the session finalizes when both files are played.
     report.finished = await until(() => app.view.name === "meeting", 10 * 60_000);
     const meeting = app.live?.meeting ?? null;
@@ -125,6 +235,7 @@ export async function run(): Promise<void> {
       report.status = detail.meeting.status;
       report.playback = await checkPlayback(detail);
       report.editing = await checkEditing();
+      if (llm) report.ai = await checkAi(meeting, llm);
       report.exportDelete = await checkExportAndDelete(meeting);
     }
     const gaps = deltaTimes.slice(1).map((time, i) => time - deltaTimes[i]!);

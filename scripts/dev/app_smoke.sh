@@ -1,8 +1,10 @@
 #!/bin/sh
-# M2 smoke run of the desktop app with fake input: builds the frontend and a debug app with
+# Smoke run of the desktop app with fake input: builds the frontend and a debug app with
 # the embedded frontend, plays the first SECONDS of the synthetic meeting-zh-dual set (mic
 # with speaker bleed, and system audio) through the real UI in a scratch library, and prints
-# the UI's report. No microphone, no permission prompts, the user's library is not touched.
+# the UI's report. AI features run against scripts/dev/mock_llm.py on this computer, with
+# keys kept in memory. No microphone, no permission prompts, no keychain, no network; the
+# user's library is not touched.
 #
 # Usage: scripts/dev/app_smoke.sh [seconds]
 # Needs: $ECHONOTE_DEV_DATA/eval/meeting-zh-dual and models (scripts/dev/fetch_assets.py,
@@ -30,16 +32,22 @@ for name, out in [("mic_bleed.wav", "mic.wav"), ("sys.wav", "sys.wav")]:
         o.writeframes(frames)
 EOF
 
+python3 "$REPO_ROOT/scripts/dev/mock_llm.py" "$OUT/mock.port" "$OUT/mock.log" &
+mock=$!
+trap 'kill "$mock" 2>/dev/null || true' EXIT
+while [ ! -s "$OUT/mock.port" ]; do sleep 0.1; done
+LLM_URL="http://127.0.0.1:$(cat "$OUT/mock.port")/v1"
+
 (cd "$REPO_ROOT/app" && pnpm build >/dev/null)
 cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" -p echonote-app --features custom-protocol
 
 started=$(date +%s)
 ECHONOTE_DATA_DIR="$OUT/library" ECHONOTE_FAKE_INPUT="$OUT/input" ECHONOTE_SMOKE="$OUT/report.json" \
-  ECHONOTE_EXPORT_DIR="$OUT/exports" \
+  ECHONOTE_EXPORT_DIR="$OUT/exports" ECHONOTE_SMOKE_LLM="$LLM_URL" ECHONOTE_HIGHLIGHTS_SECONDS=10 \
   "$REPO_ROOT/target/debug/echonote-app" >"$OUT/stdout.log" 2>"$OUT/stderr.log" &
 pid=$!
-# Real-time playback plus model load and the stop drain.
-limit=$((SECONDS_TO_PLAY + 120))
+# Real-time playback plus model load, the stop drain and the AI checks.
+limit=$((SECONDS_TO_PLAY + 240))
 while kill -0 "$pid" 2>/dev/null; do
   if [ $(($(date +%s) - started)) -gt "$limit" ]; then
     echo "smoke run timed out after ${limit}s" >&2
@@ -57,5 +65,16 @@ for path in sorted(pathlib.Path(sys.argv[1]).iterdir()):
     stamped = [line for line in lines if re.match(r"^\[\d{2}:\d{2}(:\d{2})?\] ", line)]
     labelled = [line for line in stamped if re.match(r"^\[[\d:]+\] (我|对方)：", line)]
     print(f"{path.suffix}: {len(lines)} lines, {len(stamped)} timestamped, {len(labelled)} labelled, "
-          f"heading={lines[0].startswith('# ')}, transcript_section={'## 转录' in lines}")
+          f"heading={lines[0].startswith('# ')}, transcript_section={'## 转录' in lines}, "
+          f"notes_section={'## 概要' in lines}")
+PY
+# What the mock server was asked (task names only), and that the app log leaks nothing.
+python3 - "$OUT" "$LLM_URL" <<'PY'
+import collections, pathlib, sys
+out, url = pathlib.Path(sys.argv[1]), sys.argv[2]
+tasks = collections.Counter(line.split(" ", 1)[1] for line in (out / "mock.log").read_text().splitlines())
+print("mock requests:", dict(tasks))
+log = (out / "library/logs/app.log").read_text(encoding="utf-8")
+leaks = [word for word in ["smoke-key", url, "127.0.0.1", "SMOKEFIX", "冒烟", "<transcript>"] if word in log]
+print("app log leaks:", leaks or "none")
 PY

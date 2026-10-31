@@ -5,6 +5,9 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  AiEvent,
+  AiKind,
+  AiSettings,
   AppInfo,
   CommandError,
   Delta,
@@ -13,11 +16,13 @@ import type {
   MeetingDetail,
   Meeting,
   Permissions,
+  ProviderInput,
   SearchHit,
   Segment,
   Settings,
   Snapshot,
   StorageUsage,
+  SummaryView,
 } from "./types";
 
 export const api = {
@@ -50,6 +55,28 @@ export const api = {
     invoke<string | null>("export_meeting", { id, format, utcOffsetMinutes }),
   deleteMeeting: (id: number) => invoke<void>("delete_meeting", { id }),
   storageUsage: () => invoke<StorageUsage>("storage_usage"),
+  getAi: () => invoke<AiSettings>("get_ai"),
+  saveProvider: (provider: ProviderInput) => invoke<AiSettings>("save_provider", { provider }),
+  deleteProvider: (id: string) => invoke<AiSettings>("delete_provider", { id }),
+  setAiOptions: (active: string | null, template: string, liveHighlights: boolean) =>
+    invoke<AiSettings>("set_ai_options", { active, template, liveHighlights }),
+  consentProvider: (id: string) => invoke<AiSettings>("consent_provider", { id }),
+  testProvider: (provider: ProviderInput) => invoke<void>("test_provider", { provider }),
+  listModels: (provider: ProviderInput) => invoke<string[]>("list_models", { provider }),
+  saveTemplate: (id: number | null, name: string, instructions: string) =>
+    invoke<AiSettings>("save_template", { id, name, instructions }),
+  deleteTemplate: (id: number) => invoke<AiSettings>("delete_template", { id }),
+  /// Each returns the job id; results come as `ai` events.
+  summarize: (meeting: number, template: string) => invoke<number>("summarize", { meeting, template }),
+  ask: (meeting: number, question: string) => invoke<number>("ask", { meeting, question }),
+  correctMeeting: (meeting: number) => invoke<number>("correct_meeting", { meeting }),
+  keepCorrections: (meeting: number, segment: number | null) =>
+    invoke<void>("keep_corrections", { meeting, segment }),
+  revertCorrection: (segment: number) => invoke<Segment>("revert_correction", { segment }),
+  clearQa: (meeting: number) => invoke<void>("clear_qa", { meeting }),
+  cancelJob: (job: number) => invoke<void>("cancel_job", { job }),
+  runningJobs: () => invoke<{ job: number; meeting: number; kind: AiKind }[]>("running_jobs"),
+  getHighlights: (meeting: number) => invoke<SummaryView | null>("get_highlights", { meeting }),
 };
 
 export const events = {
@@ -59,6 +86,8 @@ export const events = {
     listen("library-changed", () => handler()),
   appError: (handler: (error: CommandError) => void): Promise<UnlistenFn> =>
     listen<CommandError>("app-error", (event) => handler(event.payload)),
+  ai: (handler: (event: AiEvent) => void): Promise<UnlistenFn> =>
+    listen<AiEvent>("ai", (event) => handler(event.payload)),
 };
 
 /// The meeting's tracks mixed into one WAV (`playback.rs`). Tauri picks the URL form per

@@ -74,7 +74,111 @@ export interface MeetingDetail {
   tracks: { kind: Track; deviceName: string | null; durationMs: number | null }[];
   segments: Segment[];
   audioBytes: number;
+  notes: SummaryView | null;
+  highlights: SummaryView | null;
+  qa: QaTurn[];
+  /// LLM changes waiting for review, with the text before them.
+  corrections: { segmentId: number; previousText: string }[];
 }
+
+export interface SummaryView {
+  id: number;
+  template: string;
+  /// `name / model`.
+  provider: string;
+  title: string | null;
+  content: string;
+  truncated: boolean;
+  createdAtMs: number;
+}
+
+export interface QaTurn {
+  id: number;
+  question: string;
+  answer: string;
+  provider: string;
+  createdAtMs: number;
+  truncated: boolean;
+  excerpt: boolean;
+}
+
+export type Api = "openAi" | "anthropic";
+
+export interface Provider {
+  id: string;
+  name: string;
+  preset: string;
+  api: Api;
+  baseUrl: string;
+  model: string;
+  contextTokens: number;
+  maxOutputTokens: number;
+  proxy: string | null;
+  allowHttp: boolean;
+  headerNames: string[];
+  hasKey: boolean;
+  consentedOrigin: string | null;
+  /// Runs on this computer: nothing leaves it.
+  local: boolean;
+  origin: string | null;
+  needsConsent: boolean;
+}
+
+/// What the provider form sends. `apiKey` null keeps the saved key, "" removes it; an empty
+/// header value keeps that header's saved value.
+export interface ProviderInput {
+  id: string | null;
+  name: string;
+  preset: string;
+  api: Api;
+  baseUrl: string;
+  model: string;
+  contextTokens: number;
+  maxOutputTokens: number;
+  proxy: string | null;
+  allowHttp: boolean;
+  apiKey: string | null;
+  headers: [string, string][];
+}
+
+export interface Template {
+  id: number;
+  name: string;
+  instructions: string;
+}
+
+export interface AiSettings {
+  providers: Provider[];
+  active: string | null;
+  /// A built-in id or `custom:<id>`.
+  template: string;
+  liveHighlights: boolean;
+  builtinTemplates: string[];
+  templates: Template[];
+}
+
+export type AiKind = "notes" | "answer" | "correct" | "highlights";
+
+export type Stage =
+  | { stage: "parts"; done: number; total: number }
+  | { stage: "merging"; notes: number }
+  | { stage: "writing" }
+  | { stage: "batches"; done: number; total: number };
+
+export interface CorrectOutcome {
+  applied: number;
+  rejected: number;
+  failedBatches: number;
+  batches: number;
+}
+
+/// `ai` event; job 0 is live highlights.
+export type AiEvent = { job: number; meeting: number; kind: AiKind } & (
+  | { event: "text"; text: string }
+  | ({ event: "progress" } & Stage)
+  | { event: "done"; result: unknown }
+  | { event: "error"; error: CommandError }
+);
 
 export interface StorageUsage {
   libraryBytes: number;
@@ -105,6 +209,7 @@ export interface AppInfo {
   shortcutError: string | null;
   pendingError: CommandError | null;
   smoke: boolean;
+  smokeLlm: string | null;
 }
 
 export type Language = "zh-CN" | "en";

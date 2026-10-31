@@ -8,6 +8,7 @@
 //!   writes a JSON report there, then the app quits (`scripts/dev/app_smoke.sh`).
 //! - `ECHONOTE_EXPORT_DIR`: exports are written here without the save dialog.
 //! - `ECHONOTE_HIGHLIGHTS_SECONDS`: live highlights interval instead of three minutes.
+//! - `ECHONOTE_SMOKE_LLM`: base URL of the smoke run's mock LLM server, for the UI.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,6 +20,7 @@ pub struct Dev {
     pub smoke: Option<PathBuf>,
     pub export_dir: Option<PathBuf>,
     pub highlights_interval: Option<Duration>,
+    pub smoke_llm: Option<String>,
 }
 
 impl Dev {
@@ -36,6 +38,7 @@ impl Dev {
                 .ok()
                 .and_then(|seconds| seconds.parse().ok())
                 .map(Duration::from_secs),
+            smoke_llm: std::env::var("ECHONOTE_SMOKE_LLM").ok(),
         }
     }
 }

@@ -1,11 +1,14 @@
 <script lang="ts">
+  import { ai, aiErrorText } from "../lib/ai.svelte";
   import { app } from "../lib/app.svelte";
   import { clock } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import { api, asCommandError } from "../lib/ipc";
   import { elapsed, hasOtherSpeech, isActive, liveRows } from "../lib/live";
   import { banners, deviceName } from "../lib/notices";
+  import ConsentBanner from "./ConsentBanner.svelte";
   import LevelMeter from "./LevelMeter.svelte";
+  import Markdown from "./Markdown.svelte";
   import TranscriptList from "./TranscriptList.svelte";
 
   const live = $derived(app.live);
@@ -34,6 +37,20 @@
   $effect(() => {
     if (!editing) title = meeting?.title ?? "";
   });
+
+  const highlightsOn = $derived(ai.settings?.liveHighlights ?? false);
+  const highlights = $derived(live ? ai.highlights[live.meeting] : undefined);
+
+  $effect(() => {
+    if (live) void ai.loadHighlights(live.meeting);
+  });
+
+  async function toggleHighlights(event: Event) {
+    const box = event.currentTarget as HTMLInputElement;
+    await ai.setLiveHighlights(box.checked, live?.meeting ?? null);
+    // Not turned on (no provider yet, or waiting for consent).
+    box.checked = ai.settings?.liveHighlights ?? false;
+  }
 
   async function rename() {
     editing = false;
@@ -109,6 +126,25 @@
         <button class="link" onclick={() => (dismissed = [...dismissed, banner.key])}>{t("notice.dismiss")}</button>
       </div>
     {/each}
+
+    <div class="highlights">
+      <div class="highlights-head">
+        <strong>{t("highlights.title")}</strong>
+        <label class="toggle">
+          <input type="checkbox" class="highlights-toggle" checked={highlightsOn} onchange={toggleHighlights} />
+          <span>{t("highlights.toggle")}</span>
+        </label>
+      </div>
+      <ConsentBanner meeting={live.meeting} kinds={["highlights"]} />
+      {#if highlights?.error && highlightsOn}
+        <p class="bad">{t("highlights.failed", { error: aiErrorText(highlights.error) })}</p>
+      {/if}
+      {#if highlights?.content}
+        <div class="bullets"><Markdown text={highlights.content} /></div>
+      {:else if highlightsOn}
+        <p class="muted">{t("highlights.waiting")}</p>
+      {/if}
+    </div>
 
     <div class="transcript">
       {#if rows.length === 0}
@@ -209,6 +245,32 @@
     flex: 1;
     min-height: 0;
     border-top: 1px solid var(--border);
+  }
+  .highlights {
+    max-height: 30%;
+    overflow-y: auto;
+    padding: 6px 20px 8px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .highlights-head {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .toggle {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;
+    color: var(--muted);
+  }
+  .bullets {
+    margin-top: 4px;
+  }
+  .bad {
+    margin: 4px 0;
+    color: var(--danger);
   }
   .waiting {
     padding: 24px 20px;

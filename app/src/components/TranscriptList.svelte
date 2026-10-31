@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { diff } from "../lib/diff";
   import { clock } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import type { TranscriptRow } from "../lib/types";
@@ -13,6 +14,9 @@
     onEdit,
     onRevert,
     onRestore,
+    corrections,
+    onKeep,
+    onUndo,
   }: {
     rows: TranscriptRow[];
     /// Show "我"/"对方" (only when the other side spoke).
@@ -27,6 +31,10 @@
     onEdit?: (segmentId: number, text: string) => Promise<void>;
     onRevert?: (segmentId: number) => void;
     onRestore?: (segmentId: number) => void;
+    /// LLM changes to review: segment id → the text before.
+    corrections?: Map<number, string>;
+    onKeep?: (segmentId: number) => void;
+    onUndo?: (segmentId: number) => void;
   } = $props();
 
   // Kept here, not in the row, so a draft survives the row scrolling out of view.
@@ -162,6 +170,21 @@
               onblur={() => finishEdit(true)}
               use:autofocus
             ></textarea>
+          {:else if row.segmentId != null && corrections?.has(row.segmentId)}
+            {@const id = row.segmentId}
+            <span class="text corrected" role="presentation" ondblclick={() => startEdit(row)}>
+              {#each diff(corrections.get(id) ?? "", row.text) as part, i (i)}
+                {#if part.kind === "del"}<del>{part.text}</del>{:else if part.kind === "add"}<ins>{part.text}</ins
+                  >{:else}{part.text}{/if}
+              {/each}
+              <span class="tag ai">{t("correct.tag")}</span>
+            </span>
+            <span class="actions review">
+              {#if onKeep}<button class="link keep" onclick={() => onKeep(id)}>{t("correct.keep")}</button>{/if}
+              {#if onUndo}
+                <button class="link undo" title={t("correct.undoHint")} onclick={() => onUndo(id)}>{t("correct.undo")}</button>
+              {/if}
+            </span>
           {:else}
             <span class="text" role="presentation" ondblclick={() => startEdit(row)}>
               {row.text}
@@ -169,7 +192,7 @@
               {#if row.edited}<span class="tag">{t("edit.editedTag")}</span>{/if}
             </span>
           {/if}
-          {#if onEdit && row.segmentId != null && !row.preview && editing !== row.segmentId}
+          {#if onEdit && row.segmentId != null && !row.preview && editing !== row.segmentId && !corrections?.has(row.segmentId)}
             {@const id = row.segmentId}
             <span class="actions">
               <button class="link edit" onclick={() => startEdit(row)}>{t("edit.edit")}</button>
@@ -264,8 +287,21 @@
     opacity: 0;
   }
   .row:hover .actions,
-  .actions:focus-within {
+  .actions:focus-within,
+  .actions.review {
     opacity: 1;
+  }
+  del {
+    color: var(--danger);
+    text-decoration: line-through;
+  }
+  ins {
+    text-decoration: none;
+    background: var(--highlight);
+    border-radius: 2px;
+  }
+  .tag.ai {
+    background: var(--info-bg);
   }
   .preview .text {
     color: var(--muted);

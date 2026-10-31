@@ -5,6 +5,7 @@
   import RecordingView from "./components/RecordingView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
   import Sidebar from "./components/Sidebar.svelte";
+  import { ai } from "./lib/ai.svelte";
   import { app } from "./lib/app.svelte";
   import { errorText, t } from "./lib/i18n.svelte";
   import { asCommandError } from "./lib/ipc";
@@ -15,6 +16,8 @@
     app
       .init()
       .then(async () => {
+        // AI settings are not needed to show the app.
+        await ai.init().catch((error) => app.showError(asCommandError(error)));
         ready = true;
         if (app.info?.smoke) (await import("./smoke")).run();
       })

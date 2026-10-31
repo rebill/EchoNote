@@ -4,6 +4,7 @@
   import { bytes } from "../lib/format";
   import { api, asCommandError } from "../lib/ipc";
   import type { Device, Language, Permissions, Settings, StorageUsage } from "../lib/types";
+  import AiSettings from "./AiSettings.svelte";
   import GlossaryEditor from "./GlossaryEditor.svelte";
 
   const AUTO_STOP = [0, 5, 15, 30, 60];
@@ -111,6 +112,9 @@
 
     <h2>{t("glossary.title")}</h2>
     <GlossaryEditor />
+
+    <h2>{t("settings.ai")}</h2>
+    <AiSettings />
 
     <h2>{t("settings.permissions")}</h2>
     {#if platform === "macos" && permissions}

@@ -37,6 +37,8 @@ pub struct AppInfo {
     /// An error from a tray or shortcut action while no window was open.
     pending_error: Option<CommandError>,
     smoke: bool,
+    /// The smoke run's mock LLM server (debug builds).
+    smoke_llm: Option<String>,
 }
 
 #[tauri::command]
@@ -58,6 +60,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CommandResu
         shortcut_error: lock(&state.shortcut_error).clone(),
         pending_error: lock(&state.pending_error).take(),
         smoke: state.dev.smoke.is_some(),
+        smoke_llm: state.dev.smoke_llm.clone(),
     })
 }
 

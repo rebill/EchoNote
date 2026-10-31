@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { ai, aiErrorText } from "../lib/ai.svelte";
   import { app } from "../lib/app.svelte";
   import { bytes, dateTime, duration, utcOffsetMinutes } from "../lib/format";
   import { locale, t } from "../lib/i18n.svelte";
   import { api, asCommandError, audioUrl } from "../lib/ipc";
   import { hasOtherSpeech, replaceSegment, segmentRows } from "../lib/live";
   import type { MeetingDetail, Segment } from "../lib/types";
+  import ConsentBanner from "./ConsentBanner.svelte";
+  import QaPanel from "./QaPanel.svelte";
+  import SummaryPanel from "./SummaryPanel.svelte";
   import TranscriptList from "./TranscriptList.svelte";
 
   let { id, focus = null }: { id: number; focus?: number | null } = $props();
@@ -78,6 +82,24 @@
     try {
       const updated = await action;
       if (detail) detail = { ...detail, segments: replaceSegment(detail.segments, updated) };
+    } catch (error) {
+      app.showError(asCommandError(error));
+    }
+  }
+
+  const corrections = $derived(
+    new Map((detail?.corrections ?? []).map((correction) => [correction.segmentId, correction.previousText])),
+  );
+  const correcting = $derived(ai.run(id, "correct"));
+
+  function correct() {
+    ai.start(id, "correct", () => api.correctMeeting(id));
+  }
+
+  async function keep(segment: number | null) {
+    try {
+      await api.keepCorrections(id, segment);
+      app.libraryVersion++;
     } catch (error) {
       app.showError(asCommandError(error));
     }
@@ -208,21 +230,60 @@
 
     <div class="body">
       {#if tab === "summary"}
-        <p class="placeholder">{t("detail.summaryLater")}</p>
+        {#if recording}
+          <p class="placeholder">{t("detail.recording")}</p>
+        {:else}
+          <SummaryPanel {detail} onSeek={playable ? seek : undefined} />
+        {/if}
       {:else if tab === "qa"}
-        <p class="placeholder">{t("detail.qaLater")}</p>
+        {#if recording}
+          <p class="placeholder">{t("detail.recording")}</p>
+        {:else}
+          <QaPanel {detail} onSeek={playable ? seek : undefined} />
+        {/if}
       {:else if rows.length === 0}
         <p class="placeholder">{t("detail.empty")}</p>
       {:else}
-        <TranscriptList
-          {rows}
-          {labels}
-          {focus}
-          onSeek={playable ? seek : undefined}
-          onEdit={recording ? undefined : (segment, text) => change(api.editSegment(segment, text))}
-          onRevert={recording ? undefined : (segment) => change(api.revertSegment(segment))}
-          onRestore={recording ? undefined : (segment) => change(api.restoreSegment(segment))}
-        />
+        <div class="transcript-tab">
+          {#if !recording && ai.active}
+            <div class="ai-bar">
+              {#if correcting?.status === "running"}
+                <button class="stop-correct" disabled={correcting.job == null} onclick={() => ai.cancel(id, "correct")}>
+                  {t("correct.stop")}
+                </button>
+                <span class="muted">
+                  {correcting.stage?.stage === "batches"
+                    ? t("correct.progress", { done: correcting.stage.done, total: correcting.stage.total })
+                    : t("correct.starting")}
+                </span>
+              {:else}
+                <button class="link run-correct" onclick={correct}>{t("correct.run")}</button>
+              {/if}
+              {#if corrections.size > 0}
+                <span class="pending">{t("correct.pending", { n: corrections.size })}</span>
+                <button class="link keep-all" onclick={() => keep(null)}>{t("correct.keepAll")}</button>
+              {/if}
+              {#if correcting?.status === "error" && correcting.error}
+                <span class="bad">{aiErrorText(correcting.error)}</span>
+              {/if}
+            </div>
+            <ConsentBanner meeting={id} kinds={["correct"]} />
+          {/if}
+          <div class="list">
+            <TranscriptList
+              {rows}
+              {labels}
+              {focus}
+              {corrections}
+              onSeek={playable ? seek : undefined}
+              onEdit={recording ? undefined : (segment, text) => change(api.editSegment(segment, text))}
+              onRevert={recording ? undefined : (segment) => change(api.revertSegment(segment))}
+              onRestore={recording ? undefined : (segment) => change(api.restoreSegment(segment))}
+              onKeep={recording ? undefined : (segment) => keep(segment)}
+              onUndo={recording ? undefined : (segment) => change(api.revertCorrection(segment))}
+            />
+          </div>
+        </div>
       {/if}
     </div>
   </section>
@@ -327,5 +388,32 @@
   .placeholder {
     padding: 24px 20px;
     color: var(--muted);
+  }
+  .transcript-tab {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .transcript-tab :global(.consent) {
+    margin: 0 20px 8px;
+  }
+  .ai-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 20px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ai-bar .pending {
+    margin-left: auto;
+  }
+  .ai-bar .bad {
+    color: var(--danger);
+  }
+  .list {
+    flex: 1;
+    min-height: 0;
   }
 </style>
