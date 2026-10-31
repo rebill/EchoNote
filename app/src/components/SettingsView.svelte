@@ -1,14 +1,16 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
   import { errorText, locale, t } from "../lib/i18n.svelte";
+  import { bytes } from "../lib/format";
   import { api, asCommandError } from "../lib/ipc";
-  import type { Device, Language, Permissions, Settings } from "../lib/types";
+  import type { Device, Language, Permissions, Settings, StorageUsage } from "../lib/types";
   import GlossaryEditor from "./GlossaryEditor.svelte";
 
   const AUTO_STOP = [0, 5, 15, 30, 60];
 
   let devices = $state<Device[]>([]);
   let permissions = $state<Permissions | null>(null);
+  let storage = $state<StorageUsage | null>(null);
   let shortcut = $state(app.settings?.shortcut ?? "");
   let shortcutStatus = $state<string | null>(app.info?.shortcutError ?? null);
   const settings = $derived(app.settings);
@@ -17,6 +19,7 @@
   async function refresh() {
     permissions = await api.permissions().catch(() => null);
     devices = await api.listInputDevices().catch(() => []);
+    storage = await api.storageUsage().catch(() => null);
   }
 
   $effect(() => {
@@ -125,6 +128,16 @@
         <button class="link" onclick={() => api.openPrivacySettings("mic")}>{t("settings.open")}</button>
       </div>
       <small>{t("settings.windowsMic")}</small>
+    {/if}
+
+    {#if storage}
+      <h2>{t("settings.storage")}</h2>
+      <dl class="storage">
+        <dt>{t("settings.storageAudio")}</dt>
+        <dd>{bytes(storage.audioBytes)}</dd>
+        <dt>{t("settings.storageLibrary")}</dt>
+        <dd>{bytes(storage.libraryBytes)}</dd>
+      </dl>
     {/if}
 
     <h2>{t("settings.about")}</h2>

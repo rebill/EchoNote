@@ -596,3 +596,58 @@ fn bleed_is_still_found_when_the_decoder_lags_far_behind_the_audio() {
     assert!(mic[..12].iter().all(|s| s.crosstalk.is_none()), "{mic:#?}");
     assert_eq!(mic[12].crosstalk, Some(Crosstalk::Duplicate), "{mic:#?}");
 }
+
+#[test]
+fn deleting_removes_rows_and_files_but_not_a_live_or_unrecovered_meeting() {
+    let dir = TempDir::new();
+    let config = config(&dir, FakeModel::default());
+    // Left by a crash before any audio was written.
+    let crashed = Store::open(&config.library_path())
+        .unwrap()
+        .create_meeting("crashed", 1_000, None)
+        .unwrap();
+    // A delete interrupted after its rows were gone.
+    let leftover = config.data_dir.join("meetings").join(".trash-99");
+    std::fs::create_dir_all(&leftover).unwrap();
+    let (engine, events) = Engine::open(config).unwrap();
+    assert!(!leftover.exists());
+    // Recovery has not run yet: the crashed meeting may still be recovered.
+    assert!(matches!(
+        engine.delete_meeting(crashed),
+        Err(EngineError::InUse)
+    ));
+
+    let audio = tones(SR, 1, 30.0, &[(0.5, 1.5, 220.0, 0.3)]);
+    let live = engine
+        .start(options(Some(once(mono(), audio, Pace::Real)), None))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert!(matches!(
+        engine.delete_meeting(live),
+        Err(EngineError::InUse)
+    ));
+    engine.stop().unwrap();
+    until_finished(&events, Duration::from_secs(10));
+    let _ = engine.recover();
+
+    let usage = engine.storage_usage();
+    let bytes = engine.meeting_bytes(live);
+    assert!(usage.library_bytes > 0 && bytes > 0 && usage.audio_bytes >= bytes);
+    engine.delete_meeting(live).unwrap();
+    assert!(!engine.config().meeting_dir(live).exists());
+    let reader = engine.store().reader().unwrap();
+    assert!(matches!(
+        reader.meeting(live),
+        Err(StoreError::NoMeeting(_))
+    ));
+    assert!(segments(&reader, live).is_empty());
+    assert_eq!(
+        engine.storage_usage().audio_bytes,
+        usage.audio_bytes - bytes
+    );
+    engine.delete_meeting(crashed).unwrap();
+    assert!(matches!(
+        engine.delete_meeting(crashed),
+        Err(EngineError::Store(StoreError::NoMeeting(_)))
+    ));
+}

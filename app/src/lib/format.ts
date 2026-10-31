@@ -24,6 +24,24 @@ export function duration(ms: number, language: Language): string {
   return zh ? `${hours} 小时 ${rest} 分钟` : `${hours} h ${rest} min`;
 }
 
+/// "512 B", "3.4 KB", "10.2 MB", "1.5 GB".
+export function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
+/// Minutes east of UTC at `ms` (UTC+8 is 480), for exports in local time.
+export function utcOffsetMinutes(ms: number): number {
+  return -new Date(ms).getTimezoneOffset();
+}
+
 /// Date and time of day in the local time zone.
 export function dateTime(ms: number, language: Language): string {
   return new Intl.DateTimeFormat(language, {

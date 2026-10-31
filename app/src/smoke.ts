@@ -71,6 +71,32 @@ async function checkEditing(): Promise<Record<string, unknown>> {
   return result;
 }
 
+/// Exports both formats (the debug build writes them to ECHONOTE_EXPORT_DIR without the
+/// dialog; the shell script checks the files), then deletes the meeting through the UI.
+async function checkExportAndDelete(meeting: number): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  const offset = -new Date().getTimezoneOffset();
+  const markdown = await api.exportMeeting(meeting, "markdown", offset);
+  const text = await api.exportMeeting(meeting, "text", offset);
+  result.exported = [markdown, text].map((path) => path?.split(/[\\/]/).pop() ?? null);
+  const before = (await api.storageUsage()).audioBytes;
+  document.querySelector<HTMLButtonElement>(".detail .delete")?.click();
+  await sleep(100);
+  const confirm = document.querySelector<HTMLButtonElement>(".detail .confirm-delete");
+  result.confirmShown = !!confirm;
+  confirm?.click();
+  result.deleted = await until(
+    () => app.view.name === "home" && !app.meetings.some((m) => m.id === meeting),
+    5_000,
+  );
+  result.freedBytes = before - (await api.storageUsage()).audioBytes;
+  result.gone = await api.getMeeting(meeting).then(
+    () => false,
+    (error) => asCommandError(error).code === "not-found",
+  );
+  return result;
+}
+
 export async function run(): Promise<void> {
   const report: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const deltaTimes: number[] = [];
@@ -99,6 +125,7 @@ export async function run(): Promise<void> {
       report.status = detail.meeting.status;
       report.playback = await checkPlayback(detail);
       report.editing = await checkEditing();
+      report.exportDelete = await checkExportAndDelete(meeting);
     }
     const gaps = deltaTimes.slice(1).map((time, i) => time - deltaTimes[i]!);
     gaps.sort((a, b) => a - b);

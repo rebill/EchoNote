@@ -17,6 +17,7 @@ import type {
   Segment,
   Settings,
   Snapshot,
+  StorageUsage,
 } from "./types";
 
 export const api = {
@@ -44,6 +45,11 @@ export const api = {
   saveGlossaryEntry: (entry: { id: number | null; term: string; aliases: string[] }) =>
     invoke<GlossaryEntry[]>("save_glossary_entry", { entry }),
   deleteGlossaryEntry: (id: number) => invoke<GlossaryEntry[]>("delete_glossary_entry", { id }),
+  /// The saved path, or null when the user cancelled the dialog.
+  exportMeeting: (id: number, format: "markdown" | "text", utcOffsetMinutes: number) =>
+    invoke<string | null>("export_meeting", { id, format, utcOffsetMinutes }),
+  deleteMeeting: (id: number) => invoke<void>("delete_meeting", { id }),
+  storageUsage: () => invoke<StorageUsage>("storage_usage"),
 };
 
 export const events = {

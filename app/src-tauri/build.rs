@@ -22,6 +22,9 @@ const COMMANDS: &[&str] = &[
     "list_glossary",
     "save_glossary_entry",
     "delete_glossary_entry",
+    "export_meeting",
+    "delete_meeting",
+    "storage_usage",
 ];
 
 fn main() {

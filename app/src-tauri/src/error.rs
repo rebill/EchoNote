@@ -57,6 +57,7 @@ impl From<EngineError> for CommandError {
             EngineError::Capture(_) => "capture",
             EngineError::Busy => "busy",
             EngineError::Recovering => "recovering",
+            EngineError::InUse => "meeting-in-use",
             EngineError::NoSession => "no-session",
             EngineError::NoInput => "no-input",
             EngineError::Detector(_) => "vad-missing",

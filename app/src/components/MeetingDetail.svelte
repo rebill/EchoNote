@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/app.svelte";
-  import { dateTime, duration } from "../lib/format";
+  import { bytes, dateTime, duration, utcOffsetMinutes } from "../lib/format";
   import { locale, t } from "../lib/i18n.svelte";
   import { api, asCommandError, audioUrl } from "../lib/ipc";
   import { hasOtherSpeech, replaceSegment, segmentRows } from "../lib/live";
@@ -14,6 +14,8 @@
   let showHidden = $state(false);
   let title = $state("");
   let editing = $state(false);
+  let confirmDelete = $state(false);
+  let busy = $state(false);
 
   $effect(() => {
     void app.libraryVersion;
@@ -23,13 +25,19 @@
       .then((loaded) => {
         if (current === id) detail = loaded;
       })
-      .catch((error) => app.showError(asCommandError(error)));
+      .catch((error) => {
+        // The refetch after this meeting was deleted.
+        if (current === id && !(busy && asCommandError(error).code === "not-found")) {
+          app.showError(asCommandError(error));
+        }
+      });
   });
 
   $effect(() => {
     void id;
     showHidden = false;
     tab = "transcript";
+    confirmDelete = false;
   });
 
   $effect(() => {
@@ -75,6 +83,34 @@
     }
   }
 
+  async function exportAs(format: "markdown" | "text") {
+    if (!detail || busy) return;
+    busy = true;
+    try {
+      const path = await api.exportMeeting(id, format, utcOffsetMinutes(detail.meeting.startedAtMs));
+      if (path) app.toast = t("detail.exported", { path });
+    } catch (error) {
+      app.showError(asCommandError(error));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function remove() {
+    if (busy) return;
+    busy = true;
+    try {
+      await api.deleteMeeting(id);
+      app.view = { name: "home" };
+      await app.loadMeetings();
+    } catch (error) {
+      app.showError(asCommandError(error));
+    } finally {
+      busy = false;
+      confirmDelete = false;
+    }
+  }
+
   async function rename() {
     editing = false;
     if (!detail || title.trim() === detail.meeting.title) return;
@@ -103,11 +139,36 @@
         {#if detail.meeting.durationMs != null}
           <span>{t("detail.duration", { duration: duration(detail.meeting.durationMs, locale.value) })}</span>
         {/if}
+        {#if detail.audioBytes > 0}
+          <span>{t("detail.audioSize", { size: bytes(detail.audioBytes) })}</span>
+        {/if}
         {#if detail.meeting.status === "recovered"}
           <span class="badge" title={t("status.recoveredHint")}>{t("status.recovered")}</span>
         {/if}
+        <span class="actions">
+          <span class="muted">{t("detail.export")}</span>
+          <button class="link export-md" disabled={busy} onclick={() => exportAs("markdown")}>
+            {t("detail.exportMarkdown")}
+          </button>
+          <button class="link export-txt" disabled={busy} onclick={() => exportAs("text")}>
+            {t("detail.exportText")}
+          </button>
+          {#if !recording}
+            <button class="link danger delete" disabled={busy} onclick={() => (confirmDelete = true)}>
+              {t("detail.delete")}
+            </button>
+          {/if}
+        </span>
       </div>
     </header>
+
+    {#if confirmDelete && !recording}
+      <div class="banner confirm" role="alertdialog" aria-label={t("detail.delete")}>
+        <span>{t("detail.deleteConfirm")}</span>
+        <button class="danger confirm-delete" disabled={busy} onclick={remove}>{t("detail.deleteYes")}</button>
+        <button class="link" onclick={() => (confirmDelete = false)}>{t("detail.cancel")}</button>
+      </div>
+    {/if}
 
     {#if recording}
       <div class="banner">
@@ -194,6 +255,24 @@
     margin-top: 4px;
     font-size: 13px;
     color: var(--muted);
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .muted {
+    color: var(--muted);
+  }
+  .danger {
+    color: var(--danger);
+  }
+  .confirm {
+    align-items: center;
+    background: var(--warn-bg);
+  }
+  .confirm span {
+    flex: 1;
   }
   .badge {
     padding: 0 6px;

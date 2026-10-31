@@ -15,7 +15,7 @@ const MAX_QUERY: usize = 200;
 const SEARCH_LIMIT: usize = 200;
 
 /// Run blocking work off the async runtime.
-async fn blocking<T: Send + 'static>(
+pub async fn blocking<T: Send + 'static>(
     app: AppHandle,
     work: impl FnOnce(&AppState) -> CommandResult<T> + Send + 'static,
 ) -> CommandResult<T> {
@@ -154,13 +154,17 @@ pub struct MeetingDetail {
     meeting: MeetingView,
     tracks: Vec<TrackView>,
     segments: Vec<SegmentView>,
+    /// Size of the recordings on disk.
+    audio_bytes: u64,
 }
 
 #[tauri::command]
 pub async fn get_meeting(state: State<'_, AppState>, id: i64) -> CommandResult<MeetingDetail> {
     let glossary = state.glossary();
+    let audio_bytes = state.engine()?.meeting_bytes(id);
     state.read(|store| {
         Ok(MeetingDetail {
+            audio_bytes,
             meeting: store.meeting(id)?.into(),
             tracks: store.tracks(id)?.into_iter().map(TrackView::from).collect(),
             segments: store

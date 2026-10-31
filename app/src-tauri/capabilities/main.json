@@ -29,6 +29,9 @@
     "allow-restore-segment",
     "allow-list-glossary",
     "allow-save-glossary-entry",
-    "allow-delete-glossary-entry"
+    "allow-delete-glossary-entry",
+    "allow-export-meeting",
+    "allow-delete-meeting",
+    "allow-storage-usage"
   ]
 }

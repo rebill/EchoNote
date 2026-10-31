@@ -4,6 +4,7 @@ mod commands;
 mod dev;
 mod edit;
 mod error;
+mod files;
 mod live;
 mod log;
 mod models;
@@ -35,6 +36,8 @@ pub fn run() {
             window::show_main(app);
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Used from Rust only (export); the WebView gets no dialog permission.
+        .plugin(tauri_plugin_dialog::init())
         .on_menu_event(tray::on_menu)
         .register_asynchronous_uri_scheme_protocol(playback::SCHEME, playback::handle)
         .setup(move |app| setup(app, dev))
@@ -61,6 +64,9 @@ pub fn run() {
             edit::list_glossary,
             edit::save_glossary_entry,
             edit::delete_glossary_entry,
+            files::export_meeting,
+            files::delete_meeting,
+            files::storage_usage,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build EchoNote")

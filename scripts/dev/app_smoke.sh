@@ -16,7 +16,7 @@ DATA_DIR="${ECHONOTE_DEV_DATA:-$HOME/.cache/echonote-dev}"
 EVAL="$DATA_DIR/eval/meeting-zh-dual"
 OUT="$DATA_DIR/results/app-smoke-$(date +%Y%m%d-%H%M%S)"
 export SHERPA_ONNX_ARCHIVE_DIR="${SHERPA_ONNX_ARCHIVE_DIR:-$DATA_DIR/sherpa-onnx}"
-mkdir -p "$OUT/input" "$OUT/library"
+mkdir -p "$OUT/input" "$OUT/library" "$OUT/exports"
 
 python3 - "$EVAL" "$OUT/input" "$SECONDS_TO_PLAY" <<'EOF'
 import sys, wave
@@ -35,6 +35,7 @@ cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" -p echonote-app --fe
 
 started=$(date +%s)
 ECHONOTE_DATA_DIR="$OUT/library" ECHONOTE_FAKE_INPUT="$OUT/input" ECHONOTE_SMOKE="$OUT/report.json" \
+  ECHONOTE_EXPORT_DIR="$OUT/exports" \
   "$REPO_ROOT/target/debug/echonote-app" >"$OUT/stdout.log" 2>"$OUT/stderr.log" &
 pid=$!
 # Real-time playback plus model load and the stop drain.
@@ -48,3 +49,13 @@ while kill -0 "$pid" 2>/dev/null; do
   sleep 1
 done
 cat "$OUT/report.json"
+# The exports' shape, without printing transcript text.
+python3 - "$OUT/exports" <<'PY'
+import pathlib, re, sys
+for path in sorted(pathlib.Path(sys.argv[1]).iterdir()):
+    lines = path.read_text(encoding="utf-8").splitlines()
+    stamped = [line for line in lines if re.match(r"^\[\d{2}:\d{2}(:\d{2})?\] ", line)]
+    labelled = [line for line in stamped if re.match(r"^\[[\d:]+\] (我|对方)：", line)]
+    print(f"{path.suffix}: {len(lines)} lines, {len(stamped)} timestamped, {len(labelled)} labelled, "
+          f"heading={lines[0].startswith('# ')}, transcript_section={'## 转录' in lines}")
+PY

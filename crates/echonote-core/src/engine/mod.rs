@@ -34,7 +34,7 @@ pub use worker::{Client, Spill, Worker, WorkerEvent};
 use crate::capture::{AudioSource, CaptureError};
 use crate::pipeline::{PipelineConfig, SherpaDetector, SpeechDetector};
 use crate::recording::{RecordingError, WriterConfig};
-use crate::store::{Segment, StoreError, TrackKind};
+use crate::store::{MeetingStatus, Segment, StoreError, TrackKind};
 use crate::vad::VadSpec;
 
 pub const MIC: usize = 0;
@@ -270,6 +270,8 @@ pub enum EngineError {
     Busy,
     #[error("recovery is already running")]
     Recovering,
+    #[error("the meeting is being recorded or recovered")]
+    InUse,
     #[error("no recording in progress")]
     NoSession,
     #[error("no audio input is enabled")]
@@ -287,13 +289,51 @@ pub struct Engine {
     events: Sender<EngineEvent>,
     active: Mutex<Option<session::Handle>>,
     recovering: AtomicBool,
+    /// Recovery finished at least once: a meeting still marked `recording` that is not the
+    /// live one could not be recovered and may be deleted.
+    recovered: AtomicBool,
+}
+
+/// Bytes on disk: the library database (with its WAL) and the recordings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StorageUsage {
+    pub library_bytes: u64,
+    pub audio_bytes: u64,
+}
+
+/// Prefix of a meeting directory being deleted; left over ones are removed at startup.
+const TRASH_PREFIX: &str = ".trash-";
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => dir_size(&entry.path()),
+            Ok(kind) if kind.is_file() => entry.metadata().map_or(0, |meta| meta.len()),
+            _ => 0,
+        })
+        .sum()
 }
 
 impl Engine {
     /// Open the library (migrating it if needed) and start the worker and store threads.
     pub fn open(config: EngineConfig) -> Result<(Self, Receiver<EngineEvent>), EngineError> {
         crate::capture::ring::init_clock();
-        std::fs::create_dir_all(config.data_dir.join("meetings"))?;
+        let meetings = config.data_dir.join("meetings");
+        std::fs::create_dir_all(&meetings)?;
+        // Deletions interrupted after the rows were gone.
+        for entry in std::fs::read_dir(&meetings)?.flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(TRASH_PREFIX)
+            {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
         let store = StoreHandle::open(&config.library_path())?;
         let worker = Worker::spawn(config.idle_unload);
         let (events, received) = mpsc::channel();
@@ -305,6 +345,7 @@ impl Engine {
                 events,
                 active: Mutex::new(None),
                 recovering: AtomicBool::new(false),
+                recovered: AtomicBool::new(false),
             },
             received,
         ))
@@ -428,8 +469,69 @@ impl Engine {
             }
             Ok(recovered)
         })();
+        self.recovered.store(true, Ordering::Release);
         self.recovering.store(false, Ordering::Release);
         result
+    }
+
+    /// Delete a meeting's rows and recordings. Refused for the meeting being recorded, and
+    /// for unfinished meetings until recovery has had its turn. The directory is renamed
+    /// first, so a failure leaves either everything or nothing but a trash folder.
+    pub fn delete_meeting(&self, meeting: i64) -> Result<(), EngineError> {
+        let active = self.active.lock().map_err(|_| EngineError::Stopped)?;
+        if active
+            .as_ref()
+            .is_some_and(|handle| handle.meeting == meeting && !handle.finished())
+        {
+            return Err(EngineError::InUse);
+        }
+        let status = self.store.reader()?.meeting(meeting)?.status;
+        if status == MeetingStatus::Recording
+            && (self.recovering.load(Ordering::Acquire) || !self.recovered.load(Ordering::Acquire))
+        {
+            return Err(EngineError::InUse);
+        }
+        let dir = self.config.meeting_dir(meeting);
+        let trash = dir.with_file_name(format!("{TRASH_PREFIX}{meeting}"));
+        let moved = match std::fs::rename(&dir, &trash) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        if let Err(error) = self.store.call(move |store| store.delete_meeting(meeting)) {
+            if moved {
+                let _ = std::fs::rename(&trash, &dir);
+            }
+            return Err(error.into());
+        }
+        drop(active);
+        if moved {
+            std::fs::remove_dir_all(&trash)?;
+        }
+        Ok(())
+    }
+
+    /// Bytes used by the library and all recordings.
+    pub fn storage_usage(&self) -> StorageUsage {
+        let library = self.config.library_path();
+        let library_bytes = ["", "-wal", "-shm"]
+            .iter()
+            .filter_map(|suffix| {
+                let mut path = library.clone().into_os_string();
+                path.push(suffix);
+                std::fs::metadata(path).ok()
+            })
+            .map(|meta| meta.len())
+            .sum();
+        StorageUsage {
+            library_bytes,
+            audio_bytes: dir_size(&self.config.data_dir.join("meetings")),
+        }
+    }
+
+    /// Bytes of one meeting's recordings.
+    pub fn meeting_bytes(&self, meeting: i64) -> u64 {
+        dir_size(&self.config.meeting_dir(meeting))
     }
 }
 

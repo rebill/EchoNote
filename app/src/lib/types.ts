@@ -73,6 +73,12 @@ export interface MeetingDetail {
   meeting: Meeting;
   tracks: { kind: Track; deviceName: string | null; durationMs: number | null }[];
   segments: Segment[];
+  audioBytes: number;
+}
+
+export interface StorageUsage {
+  libraryBytes: number;
+  audioBytes: number;
 }
 
 export interface SearchHit {
