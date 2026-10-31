@@ -127,19 +127,19 @@ Acceptance targets:
 
 ## M4 AI Features
 
-- [ ] Provider abstraction: OpenAI-compatible (with presets) and Anthropic Messages; streaming SSE; cancel.
-- [ ] Keys in the OS keychain; connection test; optional proxy and extra headers.
-- [ ] Summary templates (built-in and custom), streaming Markdown, automatic title.
-- [ ] Long transcripts: port the summary planner (boundary split, bounded concurrency, retries, hierarchical merge).
-- [ ] Q&A with timestamp citations; FTS retrieval when the transcript exceeds the context budget.
-- [ ] LLM correction: changed segments only, strict validation, diff view, per-segment accept/revert.
-- [ ] Live highlights: opt-in, incremental every 3 minutes, never blocks ASR.
-- [ ] Contract tests against a mock OpenAI/Anthropic server, including errors, rate limits, and partial streams.
+- [x] Provider abstraction: OpenAI-compatible (with presets) and Anthropic Messages; streaming SSE; cancel (`echonote-llm`; presets for OpenAI, Anthropic, DeepSeek, Qwen, Kimi, Zhipu, Ollama, LM Studio, custom).
+- [x] Keys in the OS keychain; connection test; optional proxy and extra headers (one keychain entry per provider holds the key and header values; keychain round trip tested on macOS; consent per server origin before the first transcript is sent).
+- [x] Summary templates (built-in and custom), streaming Markdown, automatic title (four built-ins plus custom templates; safe Markdown subset renderer with clickable `[mm:ss]`; notes go into exports).
+- [x] Long transcripts: port the summary planner (boundary split, bounded concurrency, retries, hierarchical merge; adapts when the server window is smaller than configured).
+- [x] Q&A with timestamp citations; FTS retrieval when the transcript exceeds the context budget (BM25 over words and CJK characters/pairs with neighbouring lines, in memory per question).
+- [x] LLM correction: changed segments only, strict validation, diff view, per-segment accept/revert (applied as revisions; accept all; a user edit clears the pending mark).
+- [x] Live highlights: opt-in, incremental every 3 minutes, never blocks ASR (own thread, reads the library only).
+- [x] Contract tests against a mock OpenAI/Anthropic server, including errors, rate limits, and partial streams (12 contract tests; the app smoke run drives every AI feature through the UI against `scripts/dev/mock_llm.py`).
 
 Acceptance targets:
 
-- PRD A10 and A11 pass.
-- No API key or transcript text appears in logs.
+- PRD A10 and A11 pass. (Mock: bad key, rate limit, server error, timeout, cut-off stream and a server window smaller than configured are covered by tests; recording runs on its own threads. A real provider run is still open: it needs the user's key or a local model run at idle time.)
+- No API key or transcript text appears in logs. (Smoke run: the log has job kinds and error codes only; no key, address, transcript or answer text.)
 
 ## M5 High-Accuracy Model And Tuning
 
