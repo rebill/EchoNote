@@ -327,3 +327,31 @@ fn the_syncer_flushes_while_recording_and_on_stop() {
         .unwrap();
     sync_dir(dir.path()).unwrap();
 }
+
+#[test]
+fn readable_follows_written_pages_and_flush() {
+    let dir = TempDir::new();
+    let path = dir.path().join("live.opus");
+    let mut writer = Writer::create(&path, WriterConfig::default()).unwrap();
+    let audio = speech(RATE * 3 / 2);
+    writer.push(&audio).unwrap();
+    // One full page (1 s) is out; the encoder delay is still inside the encoder.
+    let readable = writer.readable();
+    assert!(
+        readable < RATE as u64 && readable + 200 > RATE as u64,
+        "{readable}"
+    );
+    assert_eq!(probe(&path).unwrap().samples, readable);
+    writer.flush().unwrap();
+    let readable = writer.readable();
+    assert!(
+        readable + FRAME as u64 * 2 > audio.len() as u64,
+        "{readable}"
+    );
+    // What `readable` promises decodes while the writer keeps going.
+    let decoded = decode_range(&path, 0, readable).unwrap();
+    assert_eq!(decoded.len() as u64, readable);
+    writer.push(&audio).unwrap();
+    assert_eq!(writer.finish().unwrap(), 2 * audio.len() as u64);
+    assert_eq!(probe(&path).unwrap().samples, 2 * audio.len() as u64);
+}

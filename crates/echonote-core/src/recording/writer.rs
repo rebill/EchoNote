@@ -44,6 +44,8 @@ pub struct Writer {
     frames_in_page: usize,
     /// Frames encoded so far, including the ones waiting in `page`.
     frames: u64,
+    /// Frames in pages already written to the file.
+    written: u64,
     /// Samples pushed so far.
     samples: u64,
 }
@@ -70,6 +72,7 @@ impl Writer {
             page: PageBuilder::new(serial()),
             frames_in_page: 0,
             frames: 0,
+            written: 0,
             samples: 0,
         };
 
@@ -98,6 +101,23 @@ impl Writer {
     /// Samples pushed so far: the track duration once `finish` has run.
     pub fn samples(&self) -> u64 {
         self.samples
+    }
+
+    /// Samples a reader of the file can decode now: those whose frames, plus the encoder
+    /// delay, are in written pages.
+    pub fn readable(&self) -> u64 {
+        (self.written * FRAME as u64)
+            .saturating_sub(self.delay)
+            .min(self.samples)
+    }
+
+    /// Write the page being filled now, so everything encoded so far is readable. Used before
+    /// reading recent audio back; the up to 20 ms still in the frame buffer stays there.
+    pub fn flush(&mut self) -> Result<(), RecordingError> {
+        if self.page.is_empty() {
+            return Ok(());
+        }
+        self.write_page(0)
     }
 
     /// A second handle to the file for the [`Syncer`](super::Syncer).
@@ -144,6 +164,7 @@ impl Writer {
 
     fn write_page_at(&mut self, flags: u8, granule: u64) -> Result<(), RecordingError> {
         self.frames_in_page = 0;
+        self.written = self.frames;
         let page = self.page.finish(flags, granule);
         self.file.write_all(page)?;
         Ok(())

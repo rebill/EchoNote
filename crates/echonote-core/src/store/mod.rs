@@ -37,6 +37,8 @@ pub enum StoreError {
     NoMeeting(i64),
     #[error("no segment {0}")]
     NoSegment(i64),
+    #[error("the library is closed")]
+    Closed,
 }
 
 /// A string enum stored as TEXT.

@@ -11,6 +11,21 @@ const MIN_REPETITIONS: usize = 4;
 const MAX_SEGMENT_CHARS: usize = 3000;
 const SENTENCE_ENDS: [char; 6] = ['。', '！', '？', '.', '!', '?'];
 
+/// SenseVoice can emit `<|zh|><|NEUTRAL|>`-style tags; keep only the text.
+pub fn strip_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find("<|") {
+        out.push_str(&rest[..open]);
+        match rest[open..].find("|>") {
+            Some(close) => rest = &rest[open + close + 2..],
+            None => rest = "",
+        }
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
+}
+
 pub fn sanitize(text: &str) -> String {
     let text: Vec<char> = text.trim().chars().collect();
     if text.is_empty() {

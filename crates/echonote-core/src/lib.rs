@@ -6,6 +6,7 @@
 pub mod asr;
 pub mod capture;
 pub mod crosstalk;
+pub mod engine;
 pub mod pipeline;
 pub mod recording;
 pub mod store;

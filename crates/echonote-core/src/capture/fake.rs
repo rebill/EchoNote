@@ -57,8 +57,9 @@ impl FakeSource {
                         break;
                     }
                     if frame >= limit {
+                        // A failed device is not a finished one.
                         failed.store(true, Ordering::Release);
-                        break;
+                        return;
                     }
                     let at_ns = start_ns + frame as u64 * 1_000_000_000 / rate;
                     match pace {

@@ -60,9 +60,27 @@ pub struct Job {
     pub kind: JobKind,
     /// Timeline index of `samples[0]`.
     pub start: usize,
+    /// Empty for a final whose audio was spilled (see [`Pipeline::spill_finals`]): read
+    /// `start..start + len` back from the track's recording instead.
     pub samples: Vec<f32>,
     /// Caller time when the job became available.
     pub ready_s: f64,
+}
+
+impl Job {
+    /// Timeline range of the audio this job decodes.
+    pub fn range(&self) -> (usize, usize) {
+        match self.kind {
+            JobKind::Final(cut) => (cut.audio_start, cut.audio_end),
+            JobKind::Preview { .. } => (self.start, self.start + self.samples.len()),
+        }
+    }
+
+    /// The audio was dropped from memory and has to be read from the recording.
+    pub fn is_spilled(&self) -> bool {
+        let (start, end) = self.range();
+        self.samples.is_empty() && end > start
+    }
 }
 
 /// A recognized token at its timeline position. Empty for models without token timestamps.
@@ -116,6 +134,8 @@ struct TrackState {
     /// Changes whenever the current utterance ends or is cut, so stale previews are dropped.
     utterance: u64,
     finals_in_flight: usize,
+    /// No previews for this utterance (its preview repeated the other track: speaker bleed).
+    muted: Option<u64>,
 }
 
 /// Drop timeline audio once this much is no longer needed (bounds memory, amortizes drains).
@@ -141,6 +161,7 @@ impl Pipeline {
                 fed: 0,
                 utterance: 0,
                 finals_in_flight: 0,
+                muted: None,
             })
             .collect();
         Self {
@@ -199,10 +220,11 @@ impl Pipeline {
             return None;
         }
         let eligible = |state: &TrackState| {
-            state
-                .segmenter
-                .region()
-                .is_some_and(|region| state.fed - region.span_start >= self.config.min_preview)
+            state.muted != Some(state.utterance)
+                && state
+                    .segmenter
+                    .region()
+                    .is_some_and(|region| state.fed - region.span_start >= self.config.min_preview)
         };
         let count = self.tracks.len();
         let track = match self.config.priority_track {
@@ -309,6 +331,39 @@ impl Pipeline {
     /// Samples currently held for a track (memory bound check).
     pub fn held(&self, track: usize) -> usize {
         self.tracks[track].timeline.samples.len()
+    }
+
+    /// Stop previewing the current utterance of `track` until it ends.
+    pub fn mute_previews(&mut self, track: usize) {
+        let state = &mut self.tracks[track];
+        state.muted = Some(state.utterance);
+    }
+
+    /// Samples held by queued finals.
+    pub fn queued_final_samples(&self) -> usize {
+        self.finals.iter().map(|job| job.samples.len()).sum()
+    }
+
+    /// Bound the memory of a decoder backlog: free the audio of the oldest queued finals until
+    /// at most `keep` samples are held, but only where `readable(track)` says the recording
+    /// already holds the job's audio. Returns the samples freed. Spilled jobs keep their place
+    /// and range; the caller reads the audio back before decoding.
+    pub fn spill_finals(&mut self, keep: usize, readable: impl Fn(usize) -> usize) -> usize {
+        let mut held = self.queued_final_samples();
+        let mut freed = 0;
+        for job in &mut self.finals {
+            if held <= keep {
+                break;
+            }
+            let (_, end) = job.range();
+            if job.samples.is_empty() || end > readable(job.track) {
+                continue;
+            }
+            held -= job.samples.len();
+            freed += job.samples.len();
+            job.samples = Vec::new();
+        }
+        freed
     }
 }
 

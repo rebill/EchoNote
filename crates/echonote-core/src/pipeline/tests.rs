@@ -313,3 +313,55 @@ fn finals_of_the_priority_track_are_decoded_first() {
         .collect();
     assert_eq!(order, [1, 1, 0, 0]);
 }
+
+#[test]
+fn spilled_finals_keep_their_place_and_range() {
+    let (_, audio) = bursts(4, 1.0);
+    let mut pipeline = pipeline(1, 12.0, 0.0);
+    pipeline.push(0, &audio, 0.0);
+    pipeline.finish(0.0);
+    let held = pipeline.queued_final_samples();
+    assert!(held > 0);
+    let ranges: Vec<_> = pipeline.finals.iter().map(Job::range).collect();
+    // Only audio the recording already holds can go: here up to the second final's end.
+    let readable = ranges[1].1;
+    let freed = pipeline.spill_finals(0, |_| readable);
+    let spilled: Vec<_> = pipeline.finals.iter().map(Job::is_spilled).collect();
+    assert_eq!(spilled, [true, true, false, false]);
+    assert_eq!(
+        freed,
+        (ranges[0].1 - ranges[0].0) + (ranges[1].1 - ranges[1].0)
+    );
+    assert_eq!(pipeline.queued_final_samples(), held - freed);
+    let first = pipeline.next_job(0.0).unwrap();
+    assert!(first.is_spilled() && first.samples.is_empty());
+    assert_eq!(first.range(), ranges[0]);
+}
+
+#[test]
+fn muted_utterances_get_no_previews_until_they_end() {
+    let config = PipelineConfig {
+        preview_interval_s: 0.0,
+        ..PipelineConfig::meeting(12.0, 0.0)
+    };
+    let mut pipeline = Pipeline::new(config, vec![detector()]);
+    let tone: Vec<f32> = (0..SR).map(|i| 0.3 * (i as f32 * 0.2).sin()).collect();
+    pipeline.push(0, &tone, 0.0);
+    assert!(matches!(
+        pipeline.next_job(0.0).map(|job| job.kind),
+        Some(JobKind::Preview { .. })
+    ));
+    pipeline.mute_previews(0);
+    pipeline.push(0, &tone, 1.0);
+    assert!(pipeline.next_job(1.0).is_none(), "muted");
+    // Silence ends the utterance; the next one is previewed again.
+    pipeline.push(0, &vec![0.0; SR], 2.0);
+    while let Some(job) = pipeline.next_job(2.0) {
+        assert!(matches!(job.kind, JobKind::Final(_)));
+    }
+    pipeline.push(0, &tone, 3.0);
+    assert!(matches!(
+        pipeline.next_job(3.0).map(|job| job.kind),
+        Some(JobKind::Preview { .. })
+    ));
+}
