@@ -7,6 +7,7 @@ pub mod asr;
 pub mod capture;
 pub mod crosstalk;
 pub mod pipeline;
+pub mod store;
 pub mod vad;
 
 /// Sample rate used by every model and by the internal audio timeline.

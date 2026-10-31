@@ -182,21 +182,25 @@ v1 方案：
 
 ## 11. 存储
 
-SQLite（rusqlite，bundled，启用 FTS5）：WAL、`synchronous=NORMAL`、外键开启。一个写连接在 store 线程，界面查询走只读连接。迁移版本号存 `PRAGMA user_version`，迁移前复制数据库文件。
+SQLite（rusqlite，bundled，SQLite 3.53，启用 FTS5）：WAL、`synchronous=NORMAL`、外键开启。一个写连接在 store 线程，界面查询走只读连接。迁移版本号存 `PRAGMA user_version`，迁移前用 `VACUUM INTO` 备份为 `<库文件>.v<旧版本>.bak`（含 WAL 里的数据）。库文件比应用新时拒绝打开。实现在 `echonote-core::store`，M1 建了下表中会议、轨道、段落、修订、设置和搜索索引，其余表随用到它们的里程碑以新迁移加入。
 
 | 表 | 主要字段 |
 |---|---|
 | `meetings` | id、title、started_at、ended_at、duration_ms、status（recording / finalized / recovered）、language、template_id |
-| `tracks` | meeting_id、kind（mic / sys）、file、sample_rate、duration_ms、device_name |
-| `segments` | meeting_id、track、start_ms、end_ms、text、raw_text、model、status（final / corrected / edited）、duplicate_of、revision |
-| `segment_revisions` | segment_id、revision、text、source（asr / llm / user）、created_at |
+| `tracks` | meeting_id、kind（mic / sys）、file、sample_rate、duration_ms、device_name、transcribed_until_ms（崩溃恢复从这里补转） |
+| `segments` | meeting_id、track、start_ms、end_ms、text、raw_text（去串音或修改前的识别文本）、model、source（asr / llm / user，当前文本的来源）、crosstalk（trim / duplicate / 空）、revision |
+| `segment_revisions` | segment_id、revision、text、source、created_at（当前文本在 `segments`，这里只存旧版本） |
 | `summaries` | meeting_id、template_id、provider_id、content、created_at |
 | `qa_messages` | meeting_id、role、content、citations（段落 id 列表） |
 | `templates`、`glossary`、`llm_providers`、`settings` | 配置；API Key 不在库里，只存钥匙串条目名 |
 | `jobs` | kind（retranscribe / summarize / correct）、meeting_id、state、progress、error，用于中断后恢复 |
-| `segments_fts` | FTS5 `trigram` 分词，外部内容表指向 `segments` |
+| `segments_fts` | FTS5 `trigram` 分词，无内容表（`contentless_delete`），由触发器维护 |
 
-trigram 至少需要 3 个字符，1–2 个字的中文查询退回 `LIKE`（单用户数据量下足够快）。FTS 只索引当前可见的文本（不含串音段和旧修订）。
+trigram 至少需要 3 个字符，1–2 个字的查询退回 `LIKE`（单用户数据量下足够快）。FTS 只索引当前可见的文本：串音重复段不进索引，恢复后才加入；修改后旧文本移出索引。用无内容表而不是外部内容表，是因为外部内容表删除时要提供旧值，而重复段本来就不在索引里。查询按短语匹配，用户输入里的 FTS 语法和 `LIKE` 通配符都按字面处理。
+
+串音段落的 `crosstalk` 标记取代原设计的 `duplicate_of`：判定依据是系统音频的 token，常常还没有对应的系统段落（预览阶段就判定了）。恢复重复段只清除标记；恢复裁剪段把 `raw_text` 作为用户修改写回，旧文本进修订表。
+
+`commit_finals` 在一个事务里写入一批定稿并推进各轨 `transcribed_until_ms`（只增不减）。store 只管数据行，录音文件的创建和删除由调用方负责。
 
 高精度重转会产生不同的段落边界，按段落记录的修订和问答引用会失效。重转在原有段落边界内解码；需要重新分段时保存为新的转录版本。
 
@@ -257,7 +261,7 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 
 | Spike | 结果 | 未完成 |
 |---|---|---|
-| D 静态链接 | macOS arm64、x64 通过，只依赖系统库；x64 在 Rosetta 下输出与 arm64 一致；Windows 目标通过类型检查 | Windows 实际链接（MT 静态库 + `+crt-static`）和二进制大小 |
+| D 静态链接 | macOS arm64、x64 通过，只依赖系统库；x64 在 Rosetta 下输出与 arm64 一致；Windows 目标通过类型检查（在 macOS 上：`LIBSQLITE3_SYS_USE_PKG_CONFIG=1 DOCS_RS=1 cargo check --target x86_64-pc-windows-msvc`，前者让 SQLite 不在没有 MSVC 头文件的机器上编译 C 代码） | Windows 实际链接（MT 静态库 + `+crt-static`）和二进制大小 |
 | B 系统音频 | macOS 15.7.7 通过，见 5.2 | Windows loopback 实测；macOS 14.2 首次授权流程 |
 | C 串音 | 真机结论见第 10 节；发现分段问题，加硬上限，见第 7 节 | 干净外放录音测 ERLE；AEC3 评估 |
 | E 回放 | macOS 15.7.7 结果见第 12 节 | macOS 14.2、WebView2 |

@@ -76,7 +76,8 @@ Acceptance targets:
 - [x] Mic/sys duplicate suppression: time-aligned token matching, token-level trimming, provisional decision from sys previews (`echonote-core::crosstalk`); sys finals decode first.
 - [ ] Recorded double-talk eval set (real speakers and room) with false-deletion and miss-rate gates; the synthetic `meeting-zh-dual` bleed run is the stand-in.
 - [ ] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered.
-- [ ] SQLite store (WAL, migrations, FTS5 trigram) for meetings, tracks, segments, revisions.
+- [x] SQLite store (WAL, migrations with backup, FTS5 trigram) for meetings, tracks, segments, revisions, settings (`echonote-core::store`).
+- [ ] Store thread: one writer connection owned by the engine, read-only connections for UI queries.
 - [ ] Ogg/Opus writer per track with page-level flush, background fsync every 10 s, per-track transcribed-until marker; crash recovery on startup.
 - [ ] Long-file seek accuracy on a 3-hour Ogg/Opus file in WKWebView.
 - [ ] Model lifecycle: lazy load on record, buffered audio while loading, unload after 10 minutes idle.
