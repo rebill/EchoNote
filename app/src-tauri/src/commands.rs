@@ -113,7 +113,10 @@ pub async fn search(
     if query.len() > MAX_QUERY {
         return Err(CommandError::invalid("query is too long"));
     }
-    let hits = state.read(|store| store.search(&query, meeting_id, SEARCH_LIMIT))?;
+    // A term also finds the misrecognized spellings it is shown for.
+    let glossary = state.glossary();
+    let queries = glossary.search_variants(&query);
+    let hits = state.read(|store| store.search_any(&queries, meeting_id, SEARCH_LIMIT))?;
     Ok(hits
         .into_iter()
         .map(|hit| SearchHitView {
@@ -122,7 +125,7 @@ pub async fn search(
             segment_id: hit.segment_id,
             track: hit.track.as_str(),
             start_ms: hit.start_ms,
-            text: hit.text,
+            text: glossary.apply(&hit.text).into_owned(),
         })
         .collect())
 }
@@ -155,11 +158,16 @@ pub struct MeetingDetail {
 
 #[tauri::command]
 pub async fn get_meeting(state: State<'_, AppState>, id: i64) -> CommandResult<MeetingDetail> {
+    let glossary = state.glossary();
     state.read(|store| {
         Ok(MeetingDetail {
             meeting: store.meeting(id)?.into(),
             tracks: store.tracks(id)?.into_iter().map(TrackView::from).collect(),
-            segments: store.segments(id)?.iter().map(SegmentView::from).collect(),
+            segments: store
+                .segments(id)?
+                .iter()
+                .map(|segment| SegmentView::from(segment).glossed(&glossary))
+                .collect(),
         })
     })
 }
@@ -210,11 +218,15 @@ pub async fn live_snapshot(state: State<'_, AppState>) -> CommandResult<Option<S
     let Some(mut snapshot) = snapshot else {
         return Ok(None);
     };
+    let glossary = state.glossary();
     snapshot.segments = state
         .read(|store| store.segments(snapshot.meeting))?
         .iter()
-        .map(SegmentView::from)
+        .map(|segment| SegmentView::from(segment).glossed(&glossary))
         .collect();
+    for preview in &mut snapshot.previews {
+        *preview = glossary.apply(preview).into_owned();
+    }
     Ok(Some(snapshot))
 }
 

@@ -10,6 +10,9 @@
     follow = false,
     focus = null,
     onSeek,
+    onEdit,
+    onRevert,
+    onRestore,
   }: {
     rows: TranscriptRow[];
     /// Show "我"/"对方" (only when the other side spoke).
@@ -20,7 +23,44 @@
     focus?: number | null;
     /// Makes the timestamps buttons that play from there.
     onSeek?: (startMs: number) => void;
+    /// Editing actions; rows are read-only without them.
+    onEdit?: (segmentId: number, text: string) => Promise<void>;
+    onRevert?: (segmentId: number) => void;
+    onRestore?: (segmentId: number) => void;
   } = $props();
+
+  // Kept here, not in the row, so a draft survives the row scrolling out of view.
+  let editing = $state<number | null>(null);
+  let draft = $state("");
+
+  function startEdit(row: TranscriptRow) {
+    if (!onEdit || row.segmentId == null || row.preview) return;
+    editing = row.segmentId;
+    draft = row.text;
+  }
+
+  async function finishEdit(save: boolean) {
+    const id = editing;
+    if (id == null) return;
+    editing = null;
+    const original = rows.find((row) => row.segmentId === id)?.text;
+    if (save && onEdit && draft.trim() && draft.trim() !== original) await onEdit(id, draft);
+  }
+
+  function onEditKey(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      void finishEdit(false);
+    } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      void finishEdit(true);
+    }
+  }
+
+  function autofocus(node: HTMLTextAreaElement) {
+    node.focus();
+    node.setSelectionRange(node.value.length, node.value.length);
+  }
 
   const layout = new Layout(52);
   let viewport = $state<HTMLDivElement>();
@@ -111,10 +151,38 @@
               {row.track === "sys" ? t("live.other") : t("live.me")}
             </span>
           {/if}
-          <span class="text">
-            {row.text}
-            {#if row.hidden}<span class="tag">{t("detail.bleedTag")}</span>{/if}
-          </span>
+          {#if editing != null && row.segmentId === editing}
+            <textarea
+              class="text editor"
+              rows={Math.min(8, Math.max(2, Math.ceil(draft.length / 40)))}
+              maxlength="3000"
+              aria-label={t("edit.label")}
+              bind:value={draft}
+              onkeydown={onEditKey}
+              onblur={() => finishEdit(true)}
+              use:autofocus
+            ></textarea>
+          {:else}
+            <span class="text" role="presentation" ondblclick={() => startEdit(row)}>
+              {row.text}
+              {#if row.hidden}<span class="tag">{t("detail.bleedTag")}</span>{/if}
+              {#if row.edited}<span class="tag">{t("edit.editedTag")}</span>{/if}
+            </span>
+          {/if}
+          {#if onEdit && row.segmentId != null && !row.preview && editing !== row.segmentId}
+            {@const id = row.segmentId}
+            <span class="actions">
+              <button class="link edit" onclick={() => startEdit(row)}>{t("edit.edit")}</button>
+              {#if row.edited && onRevert}
+                <button class="link revert" title={t("edit.revertHint")} onclick={() => onRevert(id)}>{t("edit.revert")}</button>
+              {/if}
+              {#if (row.hidden || row.trimmed) && onRestore}
+                <button class="link restore" title={t("edit.restoreHint")} onclick={() => onRestore(id)}>
+                  {row.hidden ? t("edit.show") : t("edit.untrim")}
+                </button>
+              {/if}
+            </span>
+          {/if}
         </div>
       {/each}
     </div>
@@ -137,7 +205,7 @@
   }
   .row {
     display: grid;
-    grid-template-columns: 56px auto 1fr;
+    grid-template-columns: 56px auto 1fr auto;
     gap: 10px;
     align-items: baseline;
     padding: 8px 20px;
@@ -179,6 +247,25 @@
   }
   .row:not(:has(.speaker)) .text {
     grid-column: 2 / 4;
+  }
+  .editor {
+    width: 100%;
+    resize: vertical;
+    font: inherit;
+    line-height: 1.6;
+    user-select: text;
+  }
+  .actions {
+    grid-column: 4;
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+  }
+  .row:hover .actions,
+  .actions:focus-within {
+    opacity: 1;
   }
   .preview .text {
     color: var(--muted);

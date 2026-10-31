@@ -55,7 +55,10 @@ fn a_new_library_is_migrated_and_reopens_unchanged() {
         .pragma_query_value(None, "foreign_keys", |row| row.get(0))
         .unwrap();
     assert!(foreign_keys);
-    assert_eq!(user_version(&store.conn).unwrap(), 1);
+    assert_eq!(
+        user_version(&store.conn).unwrap() as usize,
+        schema::MIGRATIONS.len()
+    );
     drop(store);
     Store::open(&dir.db()).unwrap();
     // A brand-new library has nothing to back up.
@@ -238,6 +241,109 @@ fn edits_keep_history_and_replace_the_indexed_text() {
 }
 
 #[test]
+fn restoring_a_revision_is_itself_an_edit() {
+    let dir = TempDir::new();
+    let (mut store, id) = meeting(&dir);
+    let segment = store
+        .commit_finals(id, &[final_(TrackKind::Mic, 0, "我们用瑞克特框架")], &[])
+        .unwrap()[0];
+    store
+        .edit_segment(segment, "我们用 React 框架", Source::User)
+        .unwrap();
+    store.restore_revision(segment, 1).unwrap();
+    let current = store.segment(segment).unwrap();
+    assert_eq!(
+        (current.text.as_str(), current.source, current.revision),
+        ("我们用瑞克特框架", Source::Asr, 3)
+    );
+    assert_eq!(store.search("瑞克特", None, 10).unwrap().len(), 1);
+    // The restore can be undone, and restoring the current revision changes nothing.
+    store.restore_revision(segment, 2).unwrap();
+    assert_eq!(store.segment(segment).unwrap().text, "我们用 React 框架");
+    store.restore_revision(segment, 4).unwrap();
+    assert_eq!(store.segment(segment).unwrap().revision, 4);
+    assert!(matches!(
+        store.restore_revision(segment, 9),
+        Err(StoreError::NoRevision { revision: 9, .. })
+    ));
+}
+
+#[test]
+fn glossary_entries_are_unique_per_term_and_searchable_by_any_spelling() {
+    let dir = TempDir::new();
+    let (mut store, id) = meeting(&dir);
+    let aliases = |list: &[&str]| {
+        list.iter()
+            .map(|alias| (*alias).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let k8s = store
+        .save_glossary_entry(None, " Kubernetes ", &aliases(&["库伯内特斯", "", "K8"]))
+        .unwrap();
+    let feishu = store
+        .save_glossary_entry(None, "飞书", &aliases(&["飞鼠"]))
+        .unwrap();
+    assert!(matches!(
+        store.save_glossary_entry(None, "kubernetes", &[]),
+        Err(StoreError::DuplicateTerm(term)) if term == "kubernetes"
+    ));
+    assert!(matches!(
+        store.save_glossary_entry(Some(feishu), "Kubernetes", &[]),
+        Err(StoreError::DuplicateTerm(_))
+    ));
+    assert!(matches!(
+        store.save_glossary_entry(Some(999), "x", &[]),
+        Err(StoreError::NoGlossaryEntry(999))
+    ));
+    assert!(matches!(
+        store.save_glossary_entry(None, " ", &[]),
+        Err(StoreError::Glossary(_))
+    ));
+    store
+        .save_glossary_entry(Some(feishu), "飞书", &aliases(&["飞鼠", "非书"]))
+        .unwrap();
+    let entries = store.glossary().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        (
+            entries[0].id,
+            entries[0].term.as_str(),
+            entries[0].aliases.clone()
+        ),
+        (k8s, "Kubernetes", aliases(&["库伯内特斯", "K8"]))
+    );
+    assert_eq!(entries[1].aliases, aliases(&["飞鼠", "非书"]));
+
+    store
+        .commit_finals(
+            id,
+            &[
+                final_(TrackKind::Mic, 0, "库伯内特斯集群要升级"),
+                final_(TrackKind::Sys, 1_000, "发到非书群里"),
+                final_(TrackKind::Mic, 2_000, "别的事情"),
+            ],
+            &[],
+        )
+        .unwrap();
+    let glossary = crate::glossary::Glossary::new(&entries);
+    let hits = store
+        .search_any(&glossary.search_variants("kubernetes集群"), None, 10)
+        .unwrap();
+    assert_eq!(texts(&hits), ["库伯内特斯集群要升级"]);
+    // Short spellings fall back to LIKE and still combine with the index.
+    let hits = store
+        .search_any(&glossary.search_variants("飞书"), None, 10)
+        .unwrap();
+    assert_eq!(texts(&hits), ["发到非书群里"]);
+    store.delete_glossary_entry(k8s).unwrap();
+    assert!(matches!(
+        store.delete_glossary_entry(k8s),
+        Err(StoreError::NoGlossaryEntry(_))
+    ));
+    assert_eq!(store.glossary().unwrap().len(), 1);
+}
+
+#[test]
 fn deleting_a_meeting_removes_its_rows_and_index_entries() {
     let dir = TempDir::new();
     let (mut store, id) = meeting(&dir);
@@ -271,28 +377,24 @@ fn migrating_an_existing_library_backs_it_up_first() {
     let (store, id) = meeting(&dir);
     drop(store);
     let mut conn = Connection::open(dir.db()).unwrap();
-    let next = [
-        schema::MIGRATIONS[0],
-        "CREATE TABLE extra (id INTEGER PRIMARY KEY);",
-    ];
+    let known = schema::MIGRATIONS.len() as u32;
+    let mut next = schema::MIGRATIONS.to_vec();
+    next.push("CREATE TABLE extra (id INTEGER PRIMARY KEY);");
     migrate(&mut conn, &dir.db(), &next).unwrap();
-    assert_eq!(user_version(&conn).unwrap(), 2);
-    let backup = Connection::open(dir.0.join("library.sqlite.v1.bak")).unwrap();
-    assert_eq!(user_version(&backup).unwrap(), 1);
+    assert_eq!(user_version(&conn).unwrap(), known + 1);
+    let backup = Connection::open(dir.0.join(format!("library.sqlite.v{known}.bak"))).unwrap();
+    assert_eq!(user_version(&backup).unwrap(), known);
     let title: String = backup
         .query_row("SELECT title FROM meetings WHERE id = ?1", [id], |row| {
             row.get(0)
         })
         .unwrap();
     assert_eq!(title, "周会");
-    // This app only knows version 1 now.
+    // This app does not know the extra migration.
     drop(conn);
     assert!(matches!(
         Store::open(&dir.db()),
-        Err(StoreError::TooNew {
-            found: 2,
-            supported: 1
-        })
+        Err(StoreError::TooNew { found, supported }) if found == known + 1 && supported == known
     ));
 }
 

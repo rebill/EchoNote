@@ -1,6 +1,9 @@
 //! What the UI receives: rows, notices and live deltas, serialized in camelCase.
 
+use std::borrow::Cow;
+
 use echonote_core::engine::{Notice, SessionStats};
+use echonote_core::glossary::Glossary;
 use echonote_core::store::{Segment, TrackKind};
 use serde::Serialize;
 
@@ -19,6 +22,16 @@ pub struct SegmentView {
     pub crosstalk: Option<&'static str>,
     pub source: &'static str,
     pub revision: u32,
+}
+
+impl SegmentView {
+    /// The text as shown: glossary aliases replaced by their terms.
+    pub fn glossed(mut self, glossary: &Glossary) -> Self {
+        if let Cow::Owned(text) = glossary.apply(&self.text) {
+            self.text = text;
+        }
+        self
+    }
 }
 
 impl From<&Segment> for SegmentView {
@@ -190,6 +203,24 @@ pub struct Delta {
 }
 
 impl Delta {
+    /// The delta as shown: glossary applied to segments and previews.
+    pub fn glossed(&self, glossary: &Glossary) -> Self {
+        let mut delta = self.clone();
+        delta.segments = delta
+            .segments
+            .into_iter()
+            .map(|segment| segment.glossed(glossary))
+            .collect();
+        if let Some(previews) = &mut delta.previews {
+            for preview in previews.iter_mut() {
+                if let Cow::Owned(text) = glossary.apply(preview) {
+                    *preview = text;
+                }
+            }
+        }
+        delta
+    }
+
     pub fn new(meeting: i64) -> Self {
         Self {
             meeting,
@@ -256,6 +287,34 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({"kind": "modelLoaded", "seconds": 1.5})
+        );
+    }
+
+    #[test]
+    fn a_glossed_delta_shows_terms_in_segments_and_previews() {
+        let glossary = Glossary::new(&[echonote_core::glossary::Entry {
+            id: 1,
+            term: "飞书".into(),
+            aliases: vec!["飞鼠".into()],
+        }]);
+        let mut delta = Delta::new(3);
+        delta.previews = Some(["打开飞鼠".into(), String::new()]);
+        delta.segments.push(SegmentView {
+            id: 1,
+            track: "sys",
+            start_ms: 0,
+            end_ms: 1,
+            text: "飞鼠文档".into(),
+            crosstalk: None,
+            source: "asr",
+            revision: 1,
+        });
+        let shown = delta.glossed(&glossary);
+        assert_eq!(shown.segments[0].text, "飞书文档");
+        assert_eq!(shown.previews, Some(["打开飞书".to_owned(), String::new()]));
+        assert_eq!(
+            delta.segments[0].text, "飞鼠文档",
+            "the original is left alone"
         );
     }
 }

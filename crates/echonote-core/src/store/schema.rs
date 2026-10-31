@@ -1,7 +1,7 @@
 //! Schema migrations. Entry `n` takes the database from `user_version` n to n + 1. Never edit
 //! a released entry; append a new one.
 
-pub const MIGRATIONS: &[&str] = &[V1];
+pub const MIGRATIONS: &[&str] = &[V1, V2];
 
 /// Meetings, their recorded tracks and transcript segments, segment history, settings, and the
 /// search index. The index is contentless and holds only visible text: segments hidden as
@@ -88,4 +88,15 @@ CREATE TRIGGER segments_fts_delete AFTER DELETE ON segments
 BEGIN
     DELETE FROM segments_fts WHERE rowid = old.id;
 END;
+"#;
+
+/// The user's glossary (`crate::glossary`): a term and the ways it gets misrecognized, one
+/// alias per line. Terms are unique regardless of ASCII case.
+const V2: &str = r#"
+CREATE TABLE glossary (
+    id INTEGER PRIMARY KEY,
+    term TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    aliases TEXT NOT NULL DEFAULT '',
+    updated_at_ms INTEGER NOT NULL
+);
 "#;

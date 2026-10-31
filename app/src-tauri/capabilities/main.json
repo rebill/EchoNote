@@ -23,6 +23,12 @@
     "allow-list-input-devices",
     "allow-permissions",
     "allow-open-privacy-settings",
-    "allow-smoke-report"
+    "allow-smoke-report",
+    "allow-edit-segment",
+    "allow-revert-segment",
+    "allow-restore-segment",
+    "allow-list-glossary",
+    "allow-save-glossary-entry",
+    "allow-delete-glossary-entry"
   ]
 }

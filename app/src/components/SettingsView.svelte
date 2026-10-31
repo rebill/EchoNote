@@ -3,6 +3,7 @@
   import { errorText, locale, t } from "../lib/i18n.svelte";
   import { api, asCommandError } from "../lib/ipc";
   import type { Device, Language, Permissions, Settings } from "../lib/types";
+  import GlossaryEditor from "./GlossaryEditor.svelte";
 
   const AUTO_STOP = [0, 5, 15, 30, 60];
 
@@ -104,6 +105,9 @@
       </div>
       <small>{shortcutStatus ?? t("settings.shortcutHint")}</small>
     </div>
+
+    <h2>{t("glossary.title")}</h2>
+    <GlossaryEditor />
 
     <h2>{t("settings.permissions")}</h2>
     {#if platform === "macos" && permissions}

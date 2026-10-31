@@ -37,6 +37,16 @@ pub enum StoreError {
     NoMeeting(i64),
     #[error("no segment {0}")]
     NoSegment(i64),
+    #[error("segment {segment} has no revision {revision}")]
+    NoRevision { segment: i64, revision: u32 },
+    #[error(transparent)]
+    Glossary(#[from] crate::glossary::GlossaryError),
+    #[error("the glossary already has this term")]
+    DuplicateTerm(String),
+    #[error("the glossary is full ({} terms)", crate::glossary::MAX_ENTRIES)]
+    GlossaryFull,
+    #[error("no glossary entry {0}")]
+    NoGlossaryEntry(i64),
     #[error("the library is closed")]
     Closed,
 }

@@ -2,6 +2,7 @@
 
 mod commands;
 mod dev;
+mod edit;
 mod error;
 mod live;
 mod log;
@@ -54,6 +55,12 @@ pub fn run() {
             commands::permissions,
             commands::open_privacy_settings,
             commands::smoke_report,
+            edit::edit_segment,
+            edit::revert_segment,
+            edit::restore_segment,
+            edit::list_glossary,
+            edit::save_glossary_entry,
+            edit::delete_glossary_entry,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build EchoNote")
@@ -91,6 +98,11 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
         }
     };
     let state = AppState::new(engine, data_dir, models, settings.clone(), dev);
+    if state.engine.is_ok()
+        && let Err(error) = state.reload_glossary()
+    {
+        log!("glossary: {error}");
+    }
     let live = state.live.clone();
     let recover = state.engine.as_ref().ok().cloned();
     app.manage(state);
@@ -182,7 +194,12 @@ struct AppSink(AppHandle);
 
 impl live::Sink for AppSink {
     fn delta(&self, delta: &Delta) {
-        let _ = self.0.emit("live", delta);
+        let glossary = self.0.state::<AppState>().glossary();
+        if glossary.is_empty() {
+            let _ = self.0.emit("live", delta);
+        } else {
+            let _ = self.0.emit("live", delta.glossed(&glossary));
+        }
     }
 
     fn state_changed(&self, _meeting: i64, state: SessionState) {

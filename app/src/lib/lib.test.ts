@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { clock, duration } from "./format";
-import { applyDelta, elapsed, fromSnapshot, hasOtherSpeech, insertSegment, liveRows, segmentRows } from "./live";
+import {
+  applyDelta,
+  elapsed,
+  fromSnapshot,
+  hasOtherSpeech,
+  insertSegment,
+  liveRows,
+  replaceSegment,
+  segmentRows,
+  splitAliases,
+} from "./live";
 import { banners, deviceName } from "./notices";
 import { en, zh } from "./strings";
 import type { Delta, Segment } from "./types";
@@ -100,6 +110,19 @@ describe("transcript rows", () => {
     const view = fromSnapshot({ meeting: 1, state: "recording", elapsedMs: 5_000, previews: ["", "so then"], notices: [], segments }, 0);
     const rows = liveRows(view);
     expect(rows.at(-1)).toMatchObject({ key: "psys", preview: true, text: "so then", startMs: 1_200 });
+  });
+
+  it("marks edited and trimmed lines and replaces an updated segment", () => {
+    const segments = [segment(1, "mic", 0), { ...segment(2, "mic", 600), crosstalk: "trim" as const }];
+    const edited = { ...segments[0]!, text: "y", source: "user" as const, revision: 2 };
+    const rows = segmentRows(replaceSegment(segments, edited));
+    expect(rows.map((row) => [row.text, row.edited, row.trimmed])).toEqual([["y", true, false], ["x", false, true]]);
+  });
+});
+
+describe("glossary", () => {
+  it("splits aliases on commas, Chinese commas and new lines", () => {
+    expect(splitAliases(" 飞鼠，非书, Fei Shu\n、 ,")).toEqual(["飞鼠", "非书", "Fei Shu"]);
   });
 });
 

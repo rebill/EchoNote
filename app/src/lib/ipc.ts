@@ -9,10 +9,12 @@ import type {
   CommandError,
   Delta,
   Device,
+  GlossaryEntry,
   MeetingDetail,
   Meeting,
   Permissions,
   SearchHit,
+  Segment,
   Settings,
   Snapshot,
 } from "./types";
@@ -35,6 +37,13 @@ export const api = {
   permissions: () => invoke<Permissions>("permissions"),
   openPrivacySettings: (kind: "mic" | "sys") => invoke<void>("open_privacy_settings", { kind }),
   smokeReport: (report: unknown) => invoke<void>("smoke_report", { report }),
+  editSegment: (id: number, text: string) => invoke<Segment>("edit_segment", { id, text }),
+  revertSegment: (id: number) => invoke<Segment>("revert_segment", { id }),
+  restoreSegment: (id: number) => invoke<Segment>("restore_segment", { id }),
+  listGlossary: () => invoke<GlossaryEntry[]>("list_glossary"),
+  saveGlossaryEntry: (entry: { id: number | null; term: string; aliases: string[] }) =>
+    invoke<GlossaryEntry[]>("save_glossary_entry", { entry }),
+  deleteGlossaryEntry: (id: number) => invoke<GlossaryEntry[]>("delete_glossary_entry", { id }),
 };
 
 export const events = {

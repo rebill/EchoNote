@@ -1,6 +1,8 @@
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::types::Value;
+use rusqlite::{OptionalExtension, Row, params_from_iter};
 
 use super::{Meeting, Revision, Segment, Store, StoreError, Track, TrackKind};
+use crate::glossary;
 
 /// The trigram index needs at least this many characters; shorter queries scan with LIKE.
 const MIN_INDEXED_QUERY: usize = 3;
@@ -116,30 +118,58 @@ impl Store {
         meeting: Option<i64>,
         limit: usize,
     ) -> Result<Vec<SearchHit>, StoreError> {
-        let query = query.trim();
-        if query.is_empty() {
+        self.search_any(&[query.to_owned()], meeting, limit)
+    }
+
+    /// Like `search`, matching any of `queries` (a query and its glossary spellings).
+    pub fn search_any(
+        &self,
+        queries: &[String],
+        meeting: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<SearchHit>, StoreError> {
+        let mut phrases = Vec::new();
+        let mut likes = Vec::new();
+        for query in queries.iter().map(|query| query.trim()) {
+            if query.is_empty() {
+                continue;
+            }
+            if query.chars().count() >= MIN_INDEXED_QUERY {
+                phrases.push(format!("\"{}\"", query.replace('"', "\"\"")));
+            } else {
+                likes.push(format!("%{}%", escape_like(query)));
+            }
+        }
+        if phrases.is_empty() && likes.is_empty() {
             return Ok(Vec::new());
         }
-        let (filter, pattern) = if query.chars().count() >= MIN_INDEXED_QUERY {
-            (
-                "s.id IN (SELECT rowid FROM segments_fts WHERE segments_fts MATCH ?1)",
-                format!("\"{}\"", query.replace('"', "\"\"")),
-            )
-        } else {
-            (
-                "s.crosstalk IS NOT 'duplicate' AND s.text LIKE ?1 ESCAPE '\\'",
-                format!("%{}%", escape_like(query)),
-            )
-        };
+        // ?1 meeting, ?2 limit, then the FTS expression, then the LIKE patterns.
+        let mut values: Vec<Value> = vec![meeting.into(), (limit as i64).into()];
+        let mut filters = Vec::new();
+        if !phrases.is_empty() {
+            values.push(phrases.join(" OR ").into());
+            filters.push(format!(
+                "s.id IN (SELECT rowid FROM segments_fts WHERE segments_fts MATCH ?{})",
+                values.len()
+            ));
+        }
+        for like in likes {
+            values.push(like.into());
+            filters.push(format!(
+                "(s.crosstalk IS NOT 'duplicate' AND s.text LIKE ?{} ESCAPE '\\')",
+                values.len()
+            ));
+        }
         let sql = format!(
             "SELECT s.meeting_id, m.title, s.id, s.track, s.start_ms, s.text
              FROM segments s JOIN meetings m ON m.id = s.meeting_id
-             WHERE {filter} AND (?2 IS NULL OR s.meeting_id = ?2)
+             WHERE ({}) AND (?1 IS NULL OR s.meeting_id = ?1)
              ORDER BY m.started_at_ms DESC, s.meeting_id DESC, s.start_ms
-             LIMIT ?3"
+             LIMIT ?2",
+            filters.join(" OR ")
         );
         let mut statement = self.conn.prepare_cached(&sql)?;
-        let rows = statement.query_map(params![pattern, meeting, limit as i64], |row| {
+        let rows = statement.query_map(params_from_iter(values), |row| {
             Ok(SearchHit {
                 meeting_id: row.get(0)?,
                 meeting_title: row.get(1)?,
@@ -147,6 +177,26 @@ impl Store {
                 track: row.get(3)?,
                 start_ms: row.get(4)?,
                 text: row.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Glossary entries in the order they were added.
+    pub fn glossary(&self) -> Result<Vec<glossary::Entry>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT id, term, aliases FROM glossary ORDER BY id")?;
+        let rows = statement.query_map([], |row| {
+            let aliases: String = row.get(2)?;
+            Ok(glossary::Entry {
+                id: row.get(0)?,
+                term: row.get(1)?,
+                aliases: aliases
+                    .lines()
+                    .filter(|alias| !alias.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

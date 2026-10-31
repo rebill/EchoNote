@@ -16,6 +16,12 @@ const COMMANDS: &[&str] = &[
     "permissions",
     "open_privacy_settings",
     "smoke_report",
+    "edit_segment",
+    "revert_segment",
+    "restore_segment",
+    "list_glossary",
+    "save_glossary_entry",
+    "delete_glossary_entry",
 ];
 
 fn main() {

@@ -115,8 +115,8 @@ Acceptance targets:
 ## M3 Playback, Editing, Export
 
 - [x] Playback via the M0 Spike E decision; click a segment to seek (custom protocol decodes the Ogg/Opus tracks to a mixed WAV per range; smoke run lands within 0.01 s of the segment start).
-- [ ] Segment editing with revisions and revert.
-- [ ] Glossary: rule replacements applied to display text; stored for hotwords and LLM prompts.
+- [x] Segment editing with revisions and revert (revert restores the recognized text as a new revision; crosstalk lines can be shown or put back).
+- [x] Glossary: rule replacements applied to display text; stored for hotwords and LLM prompts (schema V2; search also matches the misrecognized spellings).
 - [ ] Markdown and TXT export; remember the last folder.
 - [ ] Delete meeting removes database rows and audio files; show storage usage.
 

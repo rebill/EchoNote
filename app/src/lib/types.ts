@@ -134,4 +134,14 @@ export interface TranscriptRow {
   preview: boolean;
   /// Speaker bleed shown on request.
   hidden: boolean;
+  /// The text is not the recognized one (edited by the user or the LLM).
+  edited: boolean;
+  /// Words were cut as speaker bleed and can be put back.
+  trimmed: boolean;
+}
+
+export interface GlossaryEntry {
+  id: number;
+  term: string;
+  aliases: string[];
 }

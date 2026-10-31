@@ -102,6 +102,8 @@ export function segmentRows(segments: Segment[], showHidden = false): Transcript
       text: segment.text,
       preview: false,
       hidden,
+      edited: segment.source !== "asr",
+      trimmed: segment.crosstalk === "trim",
     });
   }
   return rows;
@@ -123,7 +125,22 @@ export function liveRows(view: LiveView): TranscriptRow[] {
       text,
       preview: true,
       hidden: false,
+      edited: false,
+      trimmed: false,
     });
   });
   return rows;
+}
+
+/// `segments` with the one that has `updated.id` replaced.
+export function replaceSegment(segments: Segment[], updated: Segment): Segment[] {
+  return segments.map((segment) => (segment.id === updated.id ? updated : segment));
+}
+
+/// Aliases typed into one field, separated by commas or new lines.
+export function splitAliases(text: string): string[] {
+  return text
+    .split(/[,，、\n]/)
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 0);
 }

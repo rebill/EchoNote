@@ -34,8 +34,14 @@ impl std::fmt::Display for CommandError {
 impl From<StoreError> for CommandError {
     fn from(error: StoreError) -> Self {
         let code = match error {
-            StoreError::NoMeeting(_) | StoreError::NoSegment(_) => "not-found",
+            StoreError::NoMeeting(_)
+            | StoreError::NoSegment(_)
+            | StoreError::NoRevision { .. }
+            | StoreError::NoGlossaryEntry(_) => "not-found",
             StoreError::TooNew { .. } => "library-too-new",
+            StoreError::Glossary(_) => "invalid",
+            StoreError::DuplicateTerm(_) => "duplicate-term",
+            StoreError::GlossaryFull => "glossary-full",
             _ => "store",
         };
         Self::new(code, error.to_string())

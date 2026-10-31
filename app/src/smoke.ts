@@ -40,6 +40,37 @@ async function checkPlayback(detail: MeetingDetail): Promise<Record<string, unkn
   return result;
 }
 
+/// Edits the first line through the DOM, reverts it, then checks a glossary alias is shown
+/// and searched as its term. Reports booleans only, no transcript text.
+async function checkEditing(): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  const firstText = () => document.querySelector<HTMLElement>(".detail .row .text");
+  const original = firstText()?.textContent?.trim() ?? "";
+  if (!original) return result;
+  firstText()!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  await sleep(100);
+  const editor = document.querySelector<HTMLTextAreaElement>(".detail textarea.editor");
+  result.editorOpened = !!editor;
+  if (!editor) return result;
+  editor.value = "冒烟测试修改";
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  result.edited = await until(() => !!firstText()?.textContent?.includes("冒烟测试修改"), 5_000);
+  result.editedTag = !!document.querySelector(".detail .row .tag");
+  document.querySelector<HTMLButtonElement>(".detail .row .revert")?.click();
+  result.reverted = await until(() => firstText()?.textContent?.trim() === original, 5_000);
+
+  const alias = [...original].slice(0, 2).join("");
+  const term = "SMOKETERM";
+  const saved = await api.saveGlossaryEntry({ id: null, term, aliases: [alias] });
+  result.glossaryShown = await until(() => !!firstText()?.textContent?.startsWith(term), 5_000);
+  const hits = await api.search(term);
+  result.glossarySearch = hits.length > 0 && hits.every((hit) => hit.text.includes(term));
+  for (const entry of saved) await api.deleteGlossaryEntry(entry.id);
+  result.glossaryRemoved = await until(() => firstText()?.textContent?.trim() === original, 5_000);
+  return result;
+}
+
 export async function run(): Promise<void> {
   const report: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const deltaTimes: number[] = [];
@@ -67,6 +98,7 @@ export async function run(): Promise<void> {
       report.tracks = detail.tracks.map((track) => ({ kind: track.kind, durationMs: track.durationMs }));
       report.status = detail.meeting.status;
       report.playback = await checkPlayback(detail);
+      report.editing = await checkEditing();
     }
     const gaps = deltaTimes.slice(1).map((time, i) => time - deltaTimes[i]!);
     gaps.sort((a, b) => a - b);

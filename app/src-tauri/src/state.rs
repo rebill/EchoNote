@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use echonote_core::engine::Engine;
+use echonote_core::glossary::{Entry, Glossary};
 use echonote_core::store::{Store, StoreError};
 
 use crate::dev::Dev;
@@ -28,6 +29,8 @@ pub struct AppState {
     pub pending_error: Mutex<Option<CommandError>>,
     /// Why the global shortcut could not be registered.
     pub shortcut_error: Mutex<Option<String>>,
+    /// Replacement rules for displayed and exported text; reloaded when edited.
+    glossary: Mutex<Arc<Glossary>>,
     reader: Mutex<Option<Store>>,
 }
 
@@ -53,6 +56,7 @@ impl AppState {
             quitting: AtomicBool::new(false),
             pending_error: Mutex::new(None),
             shortcut_error: Mutex::new(None),
+            glossary: Mutex::new(Arc::default()),
             reader: Mutex::new(None),
         }
     }
@@ -63,6 +67,17 @@ impl AppState {
 
     pub fn settings(&self) -> Settings {
         lock(&self.settings).clone()
+    }
+
+    pub fn glossary(&self) -> Arc<Glossary> {
+        lock(&self.glossary).clone()
+    }
+
+    /// Read the glossary from the library; returns its entries.
+    pub fn reload_glossary(&self) -> CommandResult<Vec<Entry>> {
+        let entries = self.read(|store| store.glossary())?;
+        *lock(&self.glossary) = Arc::new(Glossary::new(&entries));
+        Ok(entries)
     }
 
     /// Run `query` on the shared read-only connection, reopened after a database error.

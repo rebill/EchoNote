@@ -3,6 +3,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::{
     Crosstalk, MeetingStatus, NewSegment, NewTrack, Source, Store, StoreError, TrackKind, now_ms,
 };
+use crate::glossary;
 
 impl Store {
     /// Start a meeting in the `recording` state; returns its id.
@@ -169,6 +170,90 @@ impl Store {
             [segment],
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Bring back an earlier text of a segment as a new revision, so the restore itself can be
+    /// undone. Revision 1 is the recognized text. Restoring the current revision does nothing.
+    pub fn restore_revision(&mut self, segment: i64, revision: u32) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        let current: u32 = tx
+            .query_row(
+                "SELECT revision FROM segments WHERE id = ?1",
+                [segment],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StoreError::NoSegment(segment))?;
+        if current == revision {
+            return Ok(());
+        }
+        let (text, source): (String, Source) = tx
+            .query_row(
+                "SELECT text, source FROM segment_revisions
+                 WHERE segment_id = ?1 AND revision = ?2",
+                params![segment, revision],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(StoreError::NoRevision { segment, revision })?;
+        edit(&tx, segment, &text, source)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Add a glossary entry (`id` None) or replace one; returns its id.
+    pub fn save_glossary_entry(
+        &mut self,
+        id: Option<i64>,
+        term: &str,
+        aliases: &[String],
+    ) -> Result<i64, StoreError> {
+        let (term, aliases) = glossary::normalize(term, aliases)?;
+        let aliases = aliases.join("\n");
+        let result = match id {
+            None => {
+                let count: i64 =
+                    self.conn
+                        .query_row("SELECT count(*) FROM glossary", [], |row| row.get(0))?;
+                if count as usize >= glossary::MAX_ENTRIES {
+                    return Err(StoreError::GlossaryFull);
+                }
+                self.conn
+                    .execute(
+                        "INSERT INTO glossary (term, aliases, updated_at_ms) VALUES (?1, ?2, ?3)",
+                        params![term, aliases, now_ms()],
+                    )
+                    .map(|_| Some(self.conn.last_insert_rowid()))
+            }
+            Some(id) => self
+                .conn
+                .execute(
+                    "UPDATE glossary SET term = ?2, aliases = ?3, updated_at_ms = ?4
+                     WHERE id = ?1",
+                    params![id, term, aliases, now_ms()],
+                )
+                .map(|changed| (changed > 0).then_some(id)),
+        };
+        match result {
+            Ok(Some(saved)) => Ok(saved),
+            Ok(None) => Err(StoreError::NoGlossaryEntry(id.unwrap_or_default())),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
+            {
+                Err(StoreError::DuplicateTerm(term))
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn delete_glossary_entry(&mut self, id: i64) -> Result<(), StoreError> {
+        let changed = self
+            .conn
+            .execute("DELETE FROM glossary WHERE id = ?1", [id])?;
+        if changed == 0 {
+            return Err(StoreError::NoGlossaryEntry(id));
+        }
         Ok(())
     }
 

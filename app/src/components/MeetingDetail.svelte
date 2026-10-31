@@ -3,8 +3,8 @@
   import { dateTime, duration } from "../lib/format";
   import { locale, t } from "../lib/i18n.svelte";
   import { api, asCommandError, audioUrl } from "../lib/ipc";
-  import { hasOtherSpeech, segmentRows } from "../lib/live";
-  import type { MeetingDetail } from "../lib/types";
+  import { hasOtherSpeech, replaceSegment, segmentRows } from "../lib/live";
+  import type { MeetingDetail, Segment } from "../lib/types";
   import TranscriptList from "./TranscriptList.svelte";
 
   let { id, focus = null }: { id: number; focus?: number | null } = $props();
@@ -62,6 +62,16 @@
     else {
       player.addEventListener("loadedmetadata", play, { once: true });
       player.load();
+    }
+  }
+
+  // The library-changed event refetches too; patching here keeps the row from flickering.
+  async function change(action: Promise<Segment>) {
+    try {
+      const updated = await action;
+      if (detail) detail = { ...detail, segments: replaceSegment(detail.segments, updated) };
+    } catch (error) {
+      app.showError(asCommandError(error));
     }
   }
 
@@ -143,7 +153,15 @@
       {:else if rows.length === 0}
         <p class="placeholder">{t("detail.empty")}</p>
       {:else}
-        <TranscriptList {rows} {labels} {focus} onSeek={playable ? seek : undefined} />
+        <TranscriptList
+          {rows}
+          {labels}
+          {focus}
+          onSeek={playable ? seek : undefined}
+          onEdit={recording ? undefined : (segment, text) => change(api.editSegment(segment, text))}
+          onRevert={recording ? undefined : (segment) => change(api.revertSegment(segment))}
+          onRestore={recording ? undefined : (segment) => change(api.restoreSegment(segment))}
+        />
       {/if}
     </div>
   </section>
