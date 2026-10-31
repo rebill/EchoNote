@@ -1,0 +1,15 @@
+[package]
+name = "echonote-opus"
+description = "Vendored libopus (plain C, floating point) built with cc, with a minimal mono encoder and decoder API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+links = "opus"
+
+[dependencies]
+
+[build-dependencies]
+cc = "1"

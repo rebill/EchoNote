@@ -212,6 +212,16 @@ trigram 至少需要 3 个字符，1–2 个字的查询退回 `LIKE`（单用�
 - 约每秒写出一个 Ogg 页并 flush，应用崩溃最多丢 1 秒音频。flush 防不了断电：后台线程每 10 秒 fsync 一次（macOS 用 `F_FULLFSYNC`），不在 capture 线程上做。
 - 每批定稿写库时记录每轨"已转录到"的位置。启动时扫描 `status = recording` 的会议，读出 Ogg 实际时长，从该位置补转尾部，标记为 recovered。
 
+M1 实现（`echonote-core::recording`，libopus 在 `crates/echonote-opus`）：
+
+- libopus 1.6.1 的源码放在仓库里（约 3 MB，只有纯 C 浮点编解码器，不含 DNN 和 SIMD），用 `cc` 编译。现有 Rust 绑定（opusic-sys、audiopus_sys、opus-static-sys、libopus_sys、opus-codec、opus-head-sys）都要求 CMake，而且 macOS 上的 Windows 类型检查也会去跑 CMake。`scripts/dev/vendor_opus.py` 从 Xiph 下载并校验 sha256，按上游的 `*_sources.mk` 取文件。`DOCS_RS=1` 时跳过 C 编译，Windows 类型检查命令不变。
+- 编码复杂度取 5。M2 Air（机器有其他负载）上用 AISHELL-1 抽样 598 条（3033 s）测：复杂度 10、5、3 的编码速度分别是实时的 116、224、312 倍（占一个核的 0.86%、0.45%、0.32%）；解码约 2400 倍，3 小时的文件 5 秒内解完。码率含 Ogg 开销 22–23 kbps，每小时每轨约 10 MB。x64 在 Rosetta 下编码 202 倍。
+- 对识别的影响（SenseVoice，`--no-itn`）：原始 WAV CER 3.59%，Opus 往返后复杂度 5 为 3.72%、复杂度 3 为 3.66%，差别是 8794 字里多错 6–11 个字，复杂度之间的差异在噪声范围内。高精度重转和崩溃恢复都从 Ogg 解码，这个代价可以接受。
+- 每页一次写入，不经过用户态缓冲。崩溃时丢失的是正在积累的那一页和编码器延迟（6.5 ms）。`Syncer` 线程在开始时、每 10 秒和结束时调用 `sync_data`（macOS 上就是 `F_FULLFSYNC`），并同步所在目录，让新文件名落盘。
+- 时间线：文件第 n 个样本就是写入的第 n 个样本。编码器延迟写成 Ogg pre-skip，最后一页的 granule 位置截掉末帧补零。ffmpeg 和 WKWebView 的 `decodeAudioData` 解出的长度都与写入的样本数一致。
+- 恢复：`probe` 逐页校验 CRC，遇到截断或损坏的尾页就停，报告可解码的样本数；`repair` 截掉坏尾；`Reader::open_at` 从任意位置解码，提前 80 ms 预滚，预滚足够时与从头解码逐位一致。用 `live_demo` 回放实测：`kill -9` 后文件保留 10.993 s，同一次运行的 WAV 副本有 11.774 s，丢失不到一页。启动扫描和补转随会话状态机实现。
+- WKWebView（macOS 15.7.7）能加载、跳转、播放正常结束的文件和进程被杀后的文件；`decodeAudioData` 时长与写入一致（24.67 s、10.99 s），`audio.duration` 偏长 2.1–2.6%（25.2 s、11.28 s）。
+
 Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_probe.sh`，20 s 测试音）：
 
 | 格式 | canPlayType | `<audio>` 加载/跳转/播放 | decodeAudioData | MSE |
@@ -293,7 +303,7 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 | 流式 Zipformer zh-en | 待确认 | S2 采用前确认 |
 | Tauri、cpal、rubato、rusqlite、Svelte | MIT 或 Apache-2.0 | NOTICE 中列出 |
 | SQLite | 公有领域 | — |
-| libopus | BSD-3-Clause | NOTICE 中列出 |
+| libopus | BSD-3-Clause | NOTICE 中列出；源码随仓库分发，保留 `crates/echonote-opus/opus/COPYING` |
 | AISHELL-1、LibriSpeech | 评测用 | 不提交、不再分发 |
 
 目前是自用和源码分发，FunASR 许可的限制可以接受。如果以后要公开发布安装包或商用，需要重新评估默认模型。
@@ -313,6 +323,7 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 | 9 | S1 优先，S2 降为备选 | S2 突破内存和安装包预算；S1 是否达标待空闲时段评测 |
 | 10 | 实时门禁以 CPU 核秒每音频秒为准 | 解码线程占用与 CPU 预算的换算关系由 M0 数据得出 |
 | 11 | 分段器和调度器是 core 里同一个状态机，时钟由调用方传入 | bench 测的就是产品代码，CI 门禁可以确定性复现 |
+| 12 | libopus 源码放进仓库，用 `cc` 编译，不用 CMake 绑定 | 构建不依赖 CMake；macOS 上的 Windows 类型检查照常可用；只编纯 C，所有目标一种配置 |
 
 ## 17. 风险
 

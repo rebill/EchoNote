@@ -7,7 +7,10 @@ pub mod asr;
 pub mod capture;
 pub mod crosstalk;
 pub mod pipeline;
+pub mod recording;
 pub mod store;
+#[cfg(test)]
+mod test_util;
 pub mod text;
 pub mod vad;
 

@@ -4,7 +4,7 @@
 # in this terminal. Ctrl+C stops recording; the remaining audio is transcribed before exit.
 #
 # Usage: scripts/dev/live_demo.sh [max_minutes]
-# Output: $ECHONOTE_DEV_DATA/results/live-<timestamp>/{mic.wav,sys.wav,transcript.jsonl}
+# Output: $ECHONOTE_DEV_DATA/results/live-<timestamp>/{mic,sys}.{wav,opus} and transcript.jsonl
 set -eu
 
 MAX_MINUTES="${1:-120}"

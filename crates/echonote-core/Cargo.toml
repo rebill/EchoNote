@@ -14,6 +14,7 @@ static = ["sherpa-onnx/static"]
 shared = ["sherpa-onnx/shared"]
 
 [dependencies]
+echonote-opus = { path = "../echonote-opus" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 sherpa-onnx.workspace = true
 thiserror.workspace = true

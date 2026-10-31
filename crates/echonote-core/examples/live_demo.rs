@@ -6,8 +6,9 @@
 //! of the same moment (`echonote_core::crosstalk`): bleed is hidden, and bleed inside the
 //! user's own sentence is trimmed.
 //!
-//! macOS: run through `scripts/dev/live_demo.sh`. Writes mic.wav, sys.wav (16 kHz) and
-//! transcript.jsonl to `<out_dir>` and stops when `<out_dir>/stop` appears. Windows loopback
+//! macOS: run through `scripts/dev/live_demo.sh`. Writes mic.wav, sys.wav (16 kHz), the
+//! same audio as mic.opus and sys.opus (`echonote_core::recording`, as the app will keep it)
+//! and transcript.jsonl to `<out_dir>`; stops when `<out_dir>/stop` appears. Windows loopback
 //! sends nothing while the output is silent, so system-audio timestamps drift there.
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -38,6 +39,7 @@ mod demo {
     use echonote_core::pipeline::{
         Job, Output, Pipeline, PipelineConfig, SherpaDetector, SpeechDetector, TimedToken,
     };
+    use echonote_core::recording::{Syncer, Writer, WriterConfig};
     use echonote_core::text::sanitize;
     use echonote_core::vad::{VadKind, VadSpec};
     use rtrb::{Consumer, RingBuffer};
@@ -254,10 +256,11 @@ mod demo {
         preview: String,
         preview_utterance: u64,
         wav: hound::WavWriter<BufWriter<File>>,
+        opus: Writer,
     }
 
     impl Track {
-        fn new(source: Source, wav: &Path) -> Result<Self> {
+        fn new(source: Source, wav: &Path, opus: &Path) -> Result<Self> {
             let resampler = if source.rate as usize == SR {
                 None
             } else {
@@ -280,6 +283,11 @@ mod demo {
                 preview: String::new(),
                 preview_utterance: 0,
                 wav: hound::WavWriter::create(wav, wav_spec)?,
+                opus: {
+                    // Like the WAV, replace a file left by an earlier run into the same dir.
+                    let _ = std::fs::remove_file(opus);
+                    Writer::create(opus, WriterConfig::default())?
+                },
             })
         }
 
@@ -325,6 +333,7 @@ mod demo {
                 self.wav
                     .write_sample((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
             }
+            self.opus.push(samples)?;
             self.received += samples.len();
             Ok(())
         }
@@ -805,8 +814,8 @@ mod demo {
         let mut engine = Engine {
             pipeline: Pipeline::new(config, detectors),
             tracks: [
-                Track::new(mic, &out_dir.join("mic.wav"))?,
-                Track::new(system, &out_dir.join("sys.wav"))?,
+                Track::new(mic, &out_dir.join("mic.wav"), &out_dir.join("mic.opus"))?,
+                Track::new(system, &out_dir.join("sys.wav"), &out_dir.join("sys.opus"))?,
             ],
             jobs,
             reference: Reference::default(),
@@ -814,6 +823,12 @@ mod demo {
             loaded: false,
             busy: false,
         };
+        let sync_handles = engine
+            .tracks
+            .iter()
+            .map(|track| track.opus.sync_handle())
+            .collect::<std::io::Result<_>>()?;
+        let syncer = Syncer::spawn(&out_dir, sync_handles, Duration::from_secs(10))?;
 
         let stop_file = out_dir.join("stop");
         let deadline = started + Duration::from_secs(max_minutes * 60);
@@ -876,7 +891,9 @@ mod demo {
         session.say(&summary);
         for track in tracks {
             track.wav.finalize()?;
+            track.opus.finish()?;
         }
+        syncer.stop()?;
         Ok(())
     }
 }

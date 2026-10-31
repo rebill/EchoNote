@@ -447,6 +447,7 @@ dependencies = [
  "anyhow",
  "cc",
  "cpal",
+ "echonote-opus",
  "hound",
  "rtrb",
  "rusqlite",
@@ -454,6 +455,13 @@ dependencies = [
  "serde_json",
  "sherpa-onnx",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "echonote-opus"
+version = "1.0.0-alpha.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

@@ -78,7 +78,8 @@ Acceptance targets:
 - [ ] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered.
 - [x] SQLite store (WAL, migrations with backup, FTS5 trigram) for meetings, tracks, segments, revisions, settings (`echonote-core::store`).
 - [ ] Store thread: one writer connection owned by the engine, read-only connections for UI queries.
-- [ ] Ogg/Opus writer per track with page-level flush, background fsync every 10 s, per-track transcribed-until marker; crash recovery on startup.
+- [x] Ogg/Opus writer per track with page-level writes, background fsync every 10 s (`F_FULLFSYNC` on macOS), per-track transcribed-until marker; probe, repair and decode-from-position for recovery (`echonote-core::recording`, vendored libopus in `crates/echonote-opus`).
+- [ ] Crash recovery on startup: repair the files of meetings left in `recording`, transcribe each track from its transcribed-until marker, mark the meeting recovered (with the session state machine).
 - [ ] Long-file seek accuracy on a 3-hour Ogg/Opus file in WKWebView.
 - [ ] Model lifecycle: lazy load on record, buffered audio while loading, unload after 10 minutes idle.
 - [ ] `echonote-bench` regression gates: invariants, decode-work ratio, queue bound, error rate on frozen fixtures.

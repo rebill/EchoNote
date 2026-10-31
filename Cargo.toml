@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/echonote-core", "crates/echonote-bench"]
+members = ["crates/echonote-core", "crates/echonote-bench", "crates/echonote-opus"]
 
 [workspace.package]
 version = "1.0.0-alpha.0"
@@ -16,6 +16,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sherpa-onnx = { version = "=2.0.1", default-features = false }
 thiserror = "2"
+
+# The capture thread runs the Opus encoder; keep it optimized in debug builds too.
+[profile.dev.package.echonote-opus]
+opt-level = 3
 
 [profile.release]
 lto = "fat"
