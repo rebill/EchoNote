@@ -1,7 +1,9 @@
 // System audio capture on macOS 14.2+ through a Core Audio process tap.
 //
 // The tap mixes every process except this one into mono float32. A private aggregate device
-// hosts the tap and an IOProc forwards each buffer to the Rust callback with its host time.
+// hosts the tap and an IOProc forwards each buffer to the Rust callback with its age (how long
+// ago its first frame was captured). Opening and starting are separate so the caller can size
+// its ring buffer from the tap format before any callback runs.
 
 #import <CoreAudio/AudioHardware.h>
 #import <CoreAudio/AudioHardwareTapping.h>
@@ -13,8 +15,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-typedef void (*echonote_tap_callback)(void *context, const float *samples, uint32_t frames,
-                                      uint64_t host_time_ns);
+typedef void (*echonote_tap_callback)(void *context, const float *samples, uint32_t count,
+                                      uint64_t age_ns);
 
 typedef struct echonote_tap_format {
     double sample_rate;
@@ -31,6 +33,10 @@ typedef struct echonote_tap {
     echonote_tap_callback callback;
     void *context;
     echonote_tap_format format;
+    // Set by property listeners when the default output device or the tap format changes;
+    // the caller then replaces the tap.
+    atomic_int changed;
+    int listening;
     // Diagnostics, printed to stderr on stop when ECHONOTE_TAP_DEBUG is set.
     atomic_uint_fast64_t io_calls;
     atomic_uint_fast64_t empty_calls;
@@ -40,7 +46,7 @@ typedef struct echonote_tap {
 static OSStatus io_proc(AudioObjectID device, const AudioTimeStamp *now, const AudioBufferList *input,
                         const AudioTimeStamp *input_time, AudioBufferList *output,
                         const AudioTimeStamp *output_time, void *client) {
-    (void)device; (void)now; (void)output; (void)output_time;
+    (void)device; (void)output; (void)output_time;
     echonote_tap *tap = (echonote_tap *)client;
     atomic_fetch_add_explicit(&tap->io_calls, 1, memory_order_relaxed);
     if (input == NULL || input->mNumberBuffers == 0) {
@@ -48,14 +54,27 @@ static OSStatus io_proc(AudioObjectID device, const AudioTimeStamp *now, const A
         return noErr;
     }
     atomic_store_explicit(&tap->last_buffers, input->mNumberBuffers, memory_order_relaxed);
-    // Tap streams follow any input streams of the clock sub-device (for example a headset mic).
-    const AudioBuffer *buffer = &input->mBuffers[input->mNumberBuffers - 1];
+    // Tap streams follow any input streams of the clock sub-device; disabled streams have no
+    // data, so take the last buffer that has some.
+    const AudioBuffer *buffer = NULL;
+    for (UInt32 i = input->mNumberBuffers; i > 0; i--) {
+        if (input->mBuffers[i - 1].mData != NULL) {
+            buffer = &input->mBuffers[i - 1];
+            break;
+        }
+    }
+    if (buffer == NULL) {
+        atomic_fetch_add_explicit(&tap->empty_calls, 1, memory_order_relaxed);
+        return noErr;
+    }
     uint32_t channels = buffer->mNumberChannels ? buffer->mNumberChannels : 1;
     uint32_t frames = buffer->mDataByteSize / (uint32_t)(sizeof(float) * channels);
-    uint64_t host_ns = (input_time && (input_time->mFlags & kAudioTimeStampHostTimeValid))
-                           ? AudioConvertHostTimeToNanos(input_time->mHostTime)
-                           : AudioConvertHostTimeToNanos(AudioGetCurrentHostTime());
-    tap->callback(tap->context, (const float *)buffer->mData, frames * channels, host_ns);
+    uint64_t age_ns = 0;
+    if (input_time && now && (input_time->mFlags & kAudioTimeStampHostTimeValid) &&
+        (now->mFlags & kAudioTimeStampHostTimeValid) && now->mHostTime > input_time->mHostTime) {
+        age_ns = AudioConvertHostTimeToNanos(now->mHostTime - input_time->mHostTime);
+    }
+    tap->callback(tap->context, (const float *)buffer->mData, frames * channels, age_ns);
     return noErr;
 }
 
@@ -66,6 +85,18 @@ static OSStatus read_property(AudioObjectID object, AudioObjectPropertySelector 
     return AudioObjectGetPropertyData(object, &address, qualifier_size, qualifier, &size, data);
 }
 
+static OSStatus on_change(AudioObjectID object, UInt32 count, const AudioObjectPropertyAddress *addresses,
+                          void *client) {
+    (void)object; (void)count; (void)addresses;
+    atomic_store(&((echonote_tap *)client)->changed, 1);
+    return noErr;
+}
+
+static const AudioObjectPropertyAddress DEFAULT_OUTPUT = {
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+static const AudioObjectPropertyAddress TAP_FORMAT = {kAudioTapPropertyFormat, kAudioObjectPropertyScopeGlobal,
+                                                      kAudioObjectPropertyElementMain};
+
 void echonote_tap_stop(echonote_tap *tap);
 
 static void debug_aggregate(const echonote_tap *tap, CATapDescription *description, NSString *output_uid) {
@@ -74,27 +105,24 @@ static void debug_aggregate(const echonote_tap *tap, CATapDescription *descripti
     }
     CFStringRef tap_uid = NULL;
     read_property(tap->tap_id, kAudioTapPropertyUID, &tap_uid, sizeof(tap_uid), NULL, 0);
-    UInt32 running = 0;
-    read_property(tap->aggregate_id, kAudioDevicePropertyDeviceIsRunning, &running, sizeof(running), NULL, 0);
     AudioObjectPropertyAddress streams = {kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput,
                                           kAudioObjectPropertyElementMain};
     UInt32 streams_size = 0;
     AudioObjectGetPropertyDataSize(tap->aggregate_id, &streams, 0, NULL, &streams_size);
-    fprintf(stderr, "tap: description uuid=%s tap uid=%s output=%s running=%u input_streams=%u\n",
+    fprintf(stderr, "tap: description uuid=%s tap uid=%s output=%s input_streams=%u\n",
             description.UUID.UUIDString.UTF8String,
-            tap_uid ? ((__bridge NSString *)tap_uid).UTF8String : "?", output_uid.UTF8String, running,
+            tap_uid ? ((__bridge NSString *)tap_uid).UTF8String : "?", output_uid.UTF8String,
             (unsigned)(streams_size / sizeof(AudioStreamID)));
     if (tap_uid) {
         CFRelease(tap_uid);
     }
 }
 
-// Returns NULL and writes an OSStatus to *status on failure.
-echonote_tap *echonote_tap_start(echonote_tap_callback callback, void *context, OSStatus *status) {
+// Create the tap and its aggregate device without starting capture. Returns NULL and writes an
+// OSStatus to *status on failure.
+echonote_tap *echonote_tap_open(OSStatus *status) {
     @autoreleasepool {
         echonote_tap *tap = calloc(1, sizeof(echonote_tap));
-        tap->callback = callback;
-        tap->context = context;
 
         // Exclude our own output so playback inside EchoNote is never captured.
         NSMutableArray<NSNumber *> *excluded = [NSMutableArray array];
@@ -155,23 +183,61 @@ echonote_tap *echonote_tap_start(echonote_tap_callback callback, void *context, 
             } ],
         };
         *status = AudioHardwareCreateAggregateDevice((__bridge CFDictionaryRef)aggregate, &tap->aggregate_id);
-        if (*status == noErr) {
-            *status = AudioDeviceCreateIOProcID(tap->aggregate_id, io_proc, tap, &tap->io_proc);
-        }
-        if (*status == noErr) {
-            *status = AudioDeviceStart(tap->aggregate_id, tap->io_proc);
-        }
         if (*status != noErr) {
             echonote_tap_stop(tap);
             return NULL;
+        }
+        if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &DEFAULT_OUTPUT, on_change, tap) == noErr &&
+            AudioObjectAddPropertyListener(tap->tap_id, &TAP_FORMAT, on_change, tap) == noErr) {
+            tap->listening = 1;
         }
         debug_aggregate(tap, description, output_uid_string);
         return tap;
     }
 }
 
+// Enable only the tap's input stream: the sub-device's own inputs (a headset mic) stay closed,
+// so Bluetooth headsets are not switched to their low-quality call profile.
+static void use_tap_stream_only(echonote_tap *tap) {
+    AudioObjectPropertyAddress usage_address = {kAudioDevicePropertyIOProcStreamUsage,
+                                                kAudioObjectPropertyScopeInput, kAudioObjectPropertyElementMain};
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(tap->aggregate_id, &usage_address, 0, NULL, &size) != noErr ||
+        size < offsetof(AudioHardwareIOProcStreamUsage, mStreamIsOn)) {
+        return;
+    }
+    AudioHardwareIOProcStreamUsage *usage = calloc(1, size);
+    usage->mIOProc = (void *)tap->io_proc;
+    if (AudioObjectGetPropertyData(tap->aggregate_id, &usage_address, 0, NULL, &size, usage) == noErr &&
+        usage->mNumberStreams > 1) {
+        // The tap stream comes after the sub-device's input streams.
+        for (UInt32 i = 0; i < usage->mNumberStreams; i++) {
+            usage->mStreamIsOn[i] = (i == usage->mNumberStreams - 1);
+        }
+        AudioObjectSetPropertyData(tap->aggregate_id, &usage_address, 0, NULL, size, usage);
+    }
+    free(usage);
+}
+
+// Start delivering buffers to `callback`. Returns an OSStatus.
+OSStatus echonote_tap_start(echonote_tap *tap, echonote_tap_callback callback, void *context) {
+    tap->callback = callback;
+    tap->context = context;
+    OSStatus status = AudioDeviceCreateIOProcID(tap->aggregate_id, io_proc, tap, &tap->io_proc);
+    if (status != noErr) {
+        tap->io_proc = NULL;
+        return status;
+    }
+    use_tap_stream_only(tap);
+    return AudioDeviceStart(tap->aggregate_id, tap->io_proc);
+}
+
 echonote_tap_format echonote_tap_get_format(const echonote_tap *tap) {
     return tap->format;
+}
+
+int echonote_tap_changed(echonote_tap *tap) {
+    return atomic_load(&tap->changed);
 }
 
 void echonote_tap_stop(echonote_tap *tap) {
@@ -182,6 +248,10 @@ void echonote_tap_stop(echonote_tap *tap) {
         fprintf(stderr, "tap: io_calls=%llu empty_calls=%llu last_buffers=%u\n",
                 (unsigned long long)atomic_load(&tap->io_calls), (unsigned long long)atomic_load(&tap->empty_calls),
                 (unsigned)atomic_load(&tap->last_buffers));
+    }
+    if (tap->listening) {
+        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &DEFAULT_OUTPUT, on_change, tap);
+        AudioObjectRemovePropertyListener(tap->tap_id, &TAP_FORMAT, on_change, tap);
     }
     if (tap->aggregate_id != kAudioObjectUnknown && tap->io_proc != NULL) {
         AudioDeviceStop(tap->aggregate_id, tap->io_proc);

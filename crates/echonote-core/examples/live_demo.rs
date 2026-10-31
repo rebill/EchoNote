@@ -124,7 +124,8 @@ mod demo {
     fn start_system(_host: &cpal::Host) -> Result<Source> {
         use echonote_core::capture::macos_tap::SystemTap;
         let (mut push, samples, dropped) = ring();
-        let tap = SystemTap::start(move |data, _host_ns| push(data))?;
+        let mut tap = SystemTap::open()?;
+        tap.start(move |data, _age_ns| push(data))?;
         let format = tap.format();
         Ok(Source {
             _guard: Box::new(tap),

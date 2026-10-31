@@ -110,7 +110,8 @@ mod probe {
     #[cfg(target_os = "macos")]
     fn start_system(t0: Instant, _host: &cpal::Host) -> Result<System> {
         let (mut sink, drain, dropped) = channel(t0);
-        let tap = SystemTap::start(move |data, _host_ns| sink.push(data))?;
+        let mut tap = SystemTap::open()?;
+        tap.start(move |data, _age_ns| sink.push(data))?;
         let format = tap.format();
         Ok(System {
             guard: Box::new(tap),
