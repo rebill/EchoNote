@@ -416,3 +416,189 @@ fn a_reader_sees_committed_rows_and_cannot_write() {
     );
     assert_eq!(reader.setting("missing").unwrap(), None);
 }
+
+#[test]
+fn notes_highlights_and_qa_belong_to_the_meeting() {
+    let dir = TempDir::new();
+    let (mut store, id) = meeting(&dir);
+    let notes = |content: &'static str| NewSummary {
+        kind: SummaryKind::Notes,
+        template: "general",
+        provider: "OpenAI / gpt",
+        title: Some("预算会"),
+        content,
+        truncated: false,
+    };
+    store.save_summary(id, &notes("第一版")).unwrap();
+    store.save_summary(id, &notes("第二版")).unwrap();
+    let highlights = |content: &'static str| NewSummary {
+        kind: SummaryKind::Highlights,
+        template: "highlights",
+        provider: "OpenAI / gpt",
+        title: None,
+        content,
+        truncated: false,
+    };
+    store.save_summary(id, &highlights("- 一")).unwrap();
+    store.save_summary(id, &highlights("- 二")).unwrap();
+    let latest = store
+        .latest_summary(id, SummaryKind::Notes)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (latest.content.as_str(), latest.title.as_deref()),
+        ("第二版", Some("预算会"))
+    );
+    let kept = store
+        .latest_summary(id, SummaryKind::Highlights)
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.content, "- 二");
+    let rows: i64 = store
+        .conn
+        .query_row(
+            "SELECT count(*) FROM summaries WHERE kind = 'highlights'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 1, "highlights are replaced");
+    assert!(matches!(
+        store.save_summary(id + 9, &notes("x")),
+        Err(StoreError::NoMeeting(_))
+    ));
+
+    store
+        .add_qa(id, "谁负责？", "张三 [01:02]", "OpenAI / gpt")
+        .unwrap();
+    store
+        .add_qa(id, "什么时候？", "下周 [02:00]", "OpenAI / gpt")
+        .unwrap();
+    let turns = store.qa(id).unwrap();
+    assert_eq!(
+        turns
+            .iter()
+            .map(|t| t.question.as_str())
+            .collect::<Vec<_>>(),
+        ["谁负责？", "什么时候？"]
+    );
+    assert!(matches!(
+        store.add_qa(id + 9, "q", "a", "p"),
+        Err(StoreError::NoMeeting(_))
+    ));
+
+    // Deleting the meeting takes all of it (PRD A12).
+    store.delete_meeting(id).unwrap();
+    for table in ["summaries", "qa"] {
+        let left: i64 = store
+            .conn
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0, "{table}");
+    }
+}
+
+#[test]
+fn templates_are_checked() {
+    let dir = TempDir::new();
+    let (mut store, _) = meeting(&dir);
+    let id = store
+        .save_template(None, " 站会 ", "## 昨天\n## 今天")
+        .unwrap();
+    store
+        .save_template(Some(id), "站会", "## 昨天\n## 今天\n## 阻碍")
+        .unwrap();
+    let all = store.templates().unwrap();
+    assert_eq!((all.len(), all[0].name.as_str()), (1, "站会"));
+    assert!(store.template(id).unwrap().instructions.ends_with("阻碍"));
+    for (name, instructions) in [("", "x"), ("x", " "), ("a\nb", "x")] {
+        assert!(matches!(
+            store.save_template(None, name, instructions),
+            Err(StoreError::InvalidTemplate)
+        ));
+    }
+    assert!(matches!(
+        store.save_template(Some(99), "x", "y"),
+        Err(StoreError::NoTemplate(99))
+    ));
+    store.delete_template(id).unwrap();
+    assert!(matches!(
+        store.delete_template(id),
+        Err(StoreError::NoTemplate(_))
+    ));
+}
+
+#[test]
+fn llm_corrections_are_reviewed_kept_or_reverted() {
+    let dir = TempDir::new();
+    let (mut store, id) = meeting(&dir);
+    let ids = store
+        .commit_finals(
+            id,
+            &[
+                final_(TrackKind::Mic, 0, "发到飞鼠群里"),
+                final_(TrackKind::Sys, 1_000, "用库伯内特斯部署"),
+                final_(TrackKind::Mic, 2_000, "第三句"),
+            ],
+            &[],
+        )
+        .unwrap();
+    let fix = |segment: i64, revision: u32, text: &str| NewCorrection {
+        segment,
+        revision,
+        text: text.into(),
+    };
+    // The third was edited by the user after the LLM saw it: skipped.
+    store
+        .edit_segment(ids[2], "第三句话", Source::User)
+        .unwrap();
+    let applied = store
+        .apply_corrections(
+            id,
+            &[
+                fix(ids[0], 1, "发到飞书群里"),
+                fix(ids[1], 1, "用 Kubernetes 部署"),
+                fix(ids[2], 1, "x"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(applied, 2);
+    assert_eq!(store.segment(ids[2]).unwrap().text, "第三句话");
+    let pending = store.corrections(id).unwrap();
+    assert_eq!(
+        pending
+            .iter()
+            .map(|c| (c.segment_id, c.previous_text.as_str()))
+            .collect::<Vec<_>>(),
+        [(ids[0], "发到飞鼠群里"), (ids[1], "用库伯内特斯部署")]
+    );
+    // A second pass on the same segment still reverts to the text before the first.
+    store
+        .apply_corrections(id, &[fix(ids[0], 2, "发到飞书群")])
+        .unwrap();
+    store.revert_correction(ids[0]).unwrap();
+    let reverted = store.segment(ids[0]).unwrap();
+    assert_eq!(
+        (reverted.text.as_str(), reverted.source),
+        ("发到飞鼠群里", Source::Asr)
+    );
+    assert!(matches!(
+        store.revert_correction(ids[0]),
+        Err(StoreError::NoCorrection(_))
+    ));
+    // A user edit ends the review; keeping accepts the change.
+    store
+        .apply_corrections(id, &[fix(ids[0], 4, "发到飞书群里")])
+        .unwrap();
+    store
+        .edit_segment(ids[0], "发到飞书大群里", Source::User)
+        .unwrap();
+    assert_eq!(store.corrections(id).unwrap().len(), 1);
+    store.keep_corrections(id, None).unwrap();
+    assert!(store.corrections(id).unwrap().is_empty());
+    let kept = store.segment(ids[1]).unwrap();
+    assert_eq!(
+        (kept.text.as_str(), kept.source),
+        ("用 Kubernetes 部署", Source::Llm)
+    );
+}

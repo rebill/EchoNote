@@ -96,6 +96,7 @@ export const zh = {
   "glossary.empty": "词表还是空的。",
   "error.duplicate-term": "词表里已经有这个词。",
   "error.glossary-full": "词表已满。",
+  "error.too-many-templates": "模板数量已达上限。",
 
   "settings.title": "设置",
   "settings.general": "通用",
@@ -238,6 +239,7 @@ export const en: Record<StringKey, string> = {
   "glossary.empty": "The glossary is empty.",
   "error.duplicate-term": "The glossary already has this term.",
   "error.glossary-full": "The glossary is full.",
+  "error.too-many-templates": "There are too many templates.",
 
   "settings.title": "Settings",
   "settings.general": "General",

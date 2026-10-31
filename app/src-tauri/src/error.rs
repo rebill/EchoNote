@@ -37,11 +37,14 @@ impl From<StoreError> for CommandError {
             StoreError::NoMeeting(_)
             | StoreError::NoSegment(_)
             | StoreError::NoRevision { .. }
-            | StoreError::NoGlossaryEntry(_) => "not-found",
+            | StoreError::NoGlossaryEntry(_)
+            | StoreError::NoTemplate(_)
+            | StoreError::NoCorrection(_) => "not-found",
             StoreError::TooNew { .. } => "library-too-new",
-            StoreError::Glossary(_) => "invalid",
+            StoreError::Glossary(_) | StoreError::InvalidTemplate => "invalid",
             StoreError::DuplicateTerm(_) => "duplicate-term",
             StoreError::GlossaryFull => "glossary-full",
+            StoreError::TooManyTemplates => "too-many-templates",
             _ => "store",
         };
         Self::new(code, error.to_string())

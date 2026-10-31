@@ -78,6 +78,16 @@ pub struct Export<'a> {
     pub language: Language,
     /// Minutes east of UTC when the meeting started (UTC+8 is 480).
     pub utc_offset_minutes: i32,
+    /// The latest notes (Markdown sections), placed before the transcript.
+    pub notes: Option<&'a str>,
+}
+
+/// A transcript line in the text format, `[mm:ss] 我：text`, with its segment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptLine {
+    pub segment: i64,
+    pub start_ms: i64,
+    pub text: String,
 }
 
 /// Local calendar time: (year, month, day, hour, minute).
@@ -221,8 +231,8 @@ impl Export<'_> {
         format!("{stem}.{}", format.extension())
     }
 
-    /// Transcript lines: start, speaker label, text.
-    fn lines(&self) -> Vec<(i64, Option<&'static str>, String)> {
+    /// Transcript lines: segment, start, speaker label, text.
+    fn lines(&self) -> Vec<(i64, i64, Option<&'static str>, String)> {
         let labels = labels(self.language);
         let shown = |segment: &&Segment| segment.crosstalk != Some(Crosstalk::Duplicate);
         let other_spoke = self
@@ -242,7 +252,31 @@ impl Export<'_> {
                     TrackKind::Mic => labels.me,
                     TrackKind::Sys => labels.other,
                 });
-                Some((segment.start_ms, speaker, text))
+                Some((segment.id, segment.start_ms, speaker, text))
+            })
+            .collect()
+    }
+
+    fn line(
+        &self,
+        (_, start_ms, speaker, _): &(i64, i64, Option<&str>, String),
+        text: String,
+    ) -> String {
+        let colon = labels(self.language).colon;
+        match speaker {
+            Some(speaker) => format!("[{}] {speaker}{colon}{text}", timestamp(*start_ms)),
+            None => format!("[{}] {text}", timestamp(*start_ms)),
+        }
+    }
+
+    /// The transcript as the text export shows it, line by line (what the LLM reads).
+    pub fn transcript(&self) -> Vec<TranscriptLine> {
+        self.lines()
+            .into_iter()
+            .map(|entry| TranscriptLine {
+                segment: entry.0,
+                start_ms: entry.1,
+                text: self.line(&entry, entry.3.clone()),
             })
             .collect()
     }
@@ -259,13 +293,17 @@ impl Export<'_> {
             .meeting
             .duration_ms
             .map(|ms| duration(ms, self.language));
-        let line = |(start_ms, speaker, text): &(i64, Option<&str>, String), escaped: bool| {
-            let text = if escaped { escape(text) } else { text.clone() };
-            match speaker {
-                Some(speaker) => format!("[{}] {speaker}{colon}{text}", timestamp(*start_ms)),
-                None => format!("[{}] {text}", timestamp(*start_ms)),
-            }
+        let line = |entry: &(i64, i64, Option<&str>, String), escaped: bool| {
+            self.line(
+                entry,
+                if escaped {
+                    escape(&entry.3)
+                } else {
+                    entry.3.clone()
+                },
+            )
         };
+        let notes = self.notes.map(str::trim).filter(|notes| !notes.is_empty());
         let mut out = Vec::new();
         match format {
             Format::Markdown => {
@@ -278,6 +316,10 @@ impl Export<'_> {
                 }
                 out.push(format!("- {}{colon}#meeting #echonote", labels.tags));
                 out.push(String::new());
+                if let Some(notes) = notes {
+                    out.push(notes.to_owned());
+                    out.push(String::new());
+                }
                 out.push(format!("## {}", labels.transcript));
                 // A blank line between lines: each is its own paragraph in any renderer.
                 for entry in self.lines() {
@@ -292,6 +334,11 @@ impl Export<'_> {
                     None => out.push(format!("{date} {time}")),
                 }
                 out.push(String::new());
+                if let Some(notes) = notes {
+                    out.push(notes.to_owned());
+                    out.push(String::new());
+                    out.push(labels.transcript.to_owned());
+                }
                 out.extend(self.lines().iter().map(|entry| line(entry, false)));
             }
         }
@@ -378,6 +425,7 @@ mod tests {
             glossary: &glossary,
             language: Language::Zh,
             utc_offset_minutes: 480,
+            notes: None,
         };
         assert_eq!(
             export.render(Format::Markdown),
@@ -402,6 +450,7 @@ mod tests {
             glossary: &glossary,
             language: Language::En,
             utc_offset_minutes: 480,
+            notes: None,
         };
         assert_eq!(
             export.render(Format::Text),
@@ -424,6 +473,7 @@ mod tests {
             glossary: &Glossary::new(&[]),
             language: Language::Zh,
             utc_offset_minutes: 480,
+            notes: None,
         };
         let markdown = export.render(Format::Markdown);
         assert!(markdown.starts_with("# \\*Plan\\* \\[v2\\]\n"));
@@ -438,6 +488,40 @@ mod tests {
     }
 
     #[test]
+    fn notes_go_before_the_transcript_and_lines_keep_their_segments() {
+        let meeting = meeting("周会");
+        let (segments, glossary) = (segments(), glossary());
+        let export = Export {
+            meeting: &meeting,
+            segments: &segments,
+            glossary: &glossary,
+            language: Language::Zh,
+            utc_offset_minutes: 480,
+            notes: Some("## 概要\n讨论了飞书。\n"),
+        };
+        let markdown = export.render(Format::Markdown);
+        assert!(
+            markdown.contains("- 标签：#meeting #echonote\n\n## 概要\n讨论了飞书。\n\n## 转录\n")
+        );
+        assert!(
+            export
+                .render(Format::Text)
+                .contains("· 1 小时 2 分钟\n\n## 概要\n讨论了飞书。\n\n转录\n[00:05]")
+        );
+        let lines = export.transcript();
+        assert_eq!(lines.len(), 3, "the hidden line is left out");
+        assert_eq!(
+            lines[0],
+            TranscriptLine {
+                segment: 1,
+                start_ms: 5_000,
+                text: "[00:05] 我：打开飞书看一下".into()
+            }
+        );
+        assert_eq!(lines[1].text, "[00:07] 对方：好的 *重点* 第二行");
+    }
+
+    #[test]
     fn an_untitled_meeting_is_named_by_its_start() {
         let meeting = meeting("  ");
         let export = Export {
@@ -446,6 +530,7 @@ mod tests {
             glossary: &Glossary::new(&[]),
             language: Language::Zh,
             utc_offset_minutes: 480,
+            notes: None,
         };
         assert_eq!(export.title(), "2026-10-31 14:00 的会议");
         assert_eq!(

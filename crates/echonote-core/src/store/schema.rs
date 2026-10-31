@@ -1,7 +1,7 @@
 //! Schema migrations. Entry `n` takes the database from `user_version` n to n + 1. Never edit
 //! a released entry; append a new one.
 
-pub const MIGRATIONS: &[&str] = &[V1, V2];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3];
 
 /// Meetings, their recorded tracks and transcript segments, segment history, settings, and the
 /// search index. The index is contentless and holds only visible text: segments hidden as
@@ -99,4 +99,47 @@ CREATE TABLE glossary (
     aliases TEXT NOT NULL DEFAULT '',
     updated_at_ms INTEGER NOT NULL
 );
+"#;
+
+/// AI results. `summaries` keeps every generated set of notes (the latest is shown) and the
+/// live highlights (one row per meeting, replaced). `qa` holds question/answer turns.
+/// `templates` are the user's own summary templates. `llm_corrections` lists segments the
+/// LLM changed that the user has not reviewed, with the revision it replaced.
+const V3: &str = r#"
+CREATE TABLE summaries (
+    id INTEGER PRIMARY KEY,
+    meeting_id INTEGER NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('notes', 'highlights')),
+    template TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    title TEXT,
+    content TEXT NOT NULL,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX summaries_meeting ON summaries (meeting_id, kind, created_at_ms);
+
+CREATE TABLE qa (
+    id INTEGER PRIMARY KEY,
+    meeting_id INTEGER NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX qa_meeting ON qa (meeting_id, id);
+
+CREATE TABLE templates (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    instructions TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE llm_corrections (
+    segment_id INTEGER PRIMARY KEY REFERENCES segments (id) ON DELETE CASCADE,
+    meeting_id INTEGER NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    previous_revision INTEGER NOT NULL
+);
+CREATE INDEX llm_corrections_meeting ON llm_corrections (meeting_id);
 "#;

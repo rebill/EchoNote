@@ -17,6 +17,7 @@ use std::time::Duration;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, OpenFlags};
 
+pub use ai::{Correction, NewCorrection, NewSummary, QaTurn, SummaryRow, TemplateRow};
 pub use read::SearchHit;
 
 #[derive(Debug, thiserror::Error)]
@@ -47,6 +48,14 @@ pub enum StoreError {
     GlossaryFull,
     #[error("no glossary entry {0}")]
     NoGlossaryEntry(i64),
+    #[error("no template {0}")]
+    NoTemplate(i64),
+    #[error("segment {0} has no LLM correction to review")]
+    NoCorrection(i64),
+    #[error("a template name or its instructions are empty or too long")]
+    InvalidTemplate,
+    #[error("there are too many templates")]
+    TooManyTemplates,
     #[error("the library is closed")]
     Closed,
 }
@@ -100,6 +109,13 @@ text_enum!(
     /// the system track and is hidden.
     Crosstalk { Trim => "trim", Duplicate => "duplicate" }
 );
+text_enum!(
+    /// Notes written after the meeting, or the highlights kept while recording.
+    SummaryKind { Notes => "notes", Highlights => "highlights" }
+);
+
+// After the macro: it is only visible below its definition.
+mod ai;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Meeting {
     pub id: i64,

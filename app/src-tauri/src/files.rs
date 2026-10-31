@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use echonote_core::export::{Export, Format, Language, MAX_OFFSET_MINUTES};
+use echonote_core::store::SummaryKind;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -86,8 +87,13 @@ pub async fn export_meeting(
     let handle = app.clone();
     blocking(app, move |state| {
         let glossary = state.glossary();
-        let (meeting, segments) =
-            state.read(|store| Ok((store.meeting(id)?, store.segments(id)?)))?;
+        let (meeting, segments, notes) = state.read(|store| {
+            Ok((
+                store.meeting(id)?,
+                store.segments(id)?,
+                store.latest_summary(id, SummaryKind::Notes)?,
+            ))
+        })?;
         let language = match state.settings().language.as_str() {
             "en" => Language::En,
             _ => Language::Zh,
@@ -98,6 +104,7 @@ pub async fn export_meeting(
             glossary: &glossary,
             language,
             utc_offset_minutes,
+            notes: notes.as_ref().map(|notes| notes.content.as_str()),
         };
         let Some(path) = choose(&handle, state, &export.file_name(format), format)? else {
             return Ok(None);

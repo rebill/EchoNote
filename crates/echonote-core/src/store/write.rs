@@ -267,8 +267,14 @@ impl Store {
     }
 }
 
-/// Archive the current text as a revision and replace it.
-fn edit(conn: &Connection, segment: i64, text: &str, source: Source) -> Result<(), StoreError> {
+/// Archive the current text as a revision and replace it. A change not made by the LLM ends
+/// the review of an LLM correction of the segment.
+pub(super) fn edit(
+    conn: &Connection,
+    segment: i64,
+    text: &str,
+    source: Source,
+) -> Result<(), StoreError> {
     let archived = conn.execute(
         "INSERT INTO segment_revisions (segment_id, revision, text, source, created_at_ms)
          SELECT id, revision, text, source, updated_at_ms FROM segments WHERE id = ?1",
@@ -283,5 +289,11 @@ fn edit(conn: &Connection, segment: i64, text: &str, source: Source) -> Result<(
          WHERE id = ?1",
         params![segment, text, source, now_ms()],
     )?;
+    if source != Source::Llm {
+        conn.execute(
+            "DELETE FROM llm_corrections WHERE segment_id = ?1",
+            [segment],
+        )?;
+    }
     Ok(())
 }
