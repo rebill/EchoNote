@@ -4,6 +4,7 @@ members = [
     "crates/echonote-core",
     "crates/echonote-bench",
     "crates/echonote-llm",
+    "crates/echonote-models",
     "crates/echonote-opus",
     "app/src-tauri",
 ]
@@ -12,6 +13,7 @@ default-members = [
     "crates/echonote-core",
     "crates/echonote-bench",
     "crates/echonote-llm",
+    "crates/echonote-models",
     "crates/echonote-opus",
 ]
 

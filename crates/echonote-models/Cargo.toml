@@ -1,0 +1,32 @@
+[package]
+name = "echonote-models"
+description = "EchoNote model manager: manifest, resumable verified downloads and atomic install."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The release archives are .tar.bz2; 0.6 defaults to the pure-Rust libbz2-rs-sys.
+bzip2 = "0.6"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Same features as echonote-llm, so one build serves both.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "system-proxy"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+thiserror.workspace = true
+tokio = { version = "1", features = ["sync", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "net", "rt"] }

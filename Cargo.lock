@@ -1238,6 +1238,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "echonote-models"
+version = "1.0.0-alpha.0"
+dependencies = [
+ "bzip2 0.6.1",
+ "futures-util",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "echonote-opus"
 version = "1.0.0-alpha.0"
 dependencies = [
