@@ -410,6 +410,33 @@ mod tests {
         assert_eq!(export.file_name(Format::Text), "a_b_ c_ 2026-10-31.txt");
     }
 
+    /// Text that would become formatting, links, tags, HTML or math stays literal.
+    /// `ECHONOTE_EXPORT_SAMPLE=<path>` writes the Markdown out for a renderer check.
+    #[test]
+    fn markup_in_the_transcript_is_escaped() {
+        let meeting = meeting("*Plan* [v2]");
+        let text =
+            "**加粗** _斜体_ [链接](x) [[笔记]] #标签 <b>粗</b> $x$ ==高亮== `代码` a\\b ~~删~~";
+        let segments = [segment(1, TrackKind::Mic, 0, text)];
+        let export = Export {
+            meeting: &meeting,
+            segments: &segments,
+            glossary: &Glossary::new(&[]),
+            language: Language::Zh,
+            utc_offset_minutes: 480,
+        };
+        let markdown = export.render(Format::Markdown);
+        assert!(markdown.starts_with("# \\*Plan\\* \\[v2\\]\n"));
+        assert!(markdown.ends_with(
+            "[00:00] \\*\\*加粗\\*\\* \\_斜体\\_ \\[链接\\](x) \\[\\[笔记\\]\\] \\#标签 \
+             \\<b\\>粗\\</b\\> \\$x\\$ \\=\\=高亮\\=\\= \\`代码\\` a\\\\b \\~\\~删\\~\\~\n"
+        ));
+        assert!(export.render(Format::Text).contains(text));
+        if let Some(path) = std::env::var_os("ECHONOTE_EXPORT_SAMPLE") {
+            std::fs::write(path, markdown).unwrap();
+        }
+    }
+
     #[test]
     fn an_untitled_meeting_is_named_by_its_start() {
         let meeting = meeting("  ");
