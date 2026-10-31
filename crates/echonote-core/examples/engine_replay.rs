@@ -61,6 +61,7 @@ fn main() -> Result<()> {
         language: None,
         mic: Some(open("mic16.wav")?),
         sys: Some(open("sys16.wav")?),
+        auto_stop: None,
     })?;
     loop {
         match events.recv_timeout(Duration::from_secs(600))? {

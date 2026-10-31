@@ -84,8 +84,9 @@ pub enum Permission {
     Undetermined,
 }
 
-/// Microphone permission. Only macOS reports it; Windows shows silence when the privacy
-/// switch is off, which the session detects instead.
+/// Microphone permission. On Windows a microphone behind the privacy switch opens fine and
+/// records silence, so the switch is read from the registry instead (`Undetermined` never
+/// occurs there).
 pub fn mic_permission() -> Permission {
     #[cfg(target_os = "macos")]
     {
@@ -97,6 +98,27 @@ pub fn mic_permission() -> Permission {
             3 => Permission::Granted,
             0 => Permission::Undetermined,
             _ => Permission::Denied,
+        }
+    }
+    #[cfg(target_os = "windows")]
+    return system_windows::mic_privacy();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Permission::Granted
+}
+
+/// System audio permission. macOS asks when the first tap is created and a denied tap records
+/// silence; `Undetermined` also covers "could not tell". Windows needs no permission.
+pub fn sys_permission() -> Permission {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn echonote_audio_capture_permission() -> i32;
+        }
+        // SAFETY: a TCC preflight query; returns 2 when the private symbol is unavailable.
+        match unsafe { echonote_audio_capture_permission() } {
+            0 => Permission::Granted,
+            1 => Permission::Denied,
+            _ => Permission::Undetermined,
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -191,5 +213,20 @@ fn fourcc(status: i32) -> String {
         format!("'{}'", String::from_utf8_lossy(&bytes))
     } else {
         "-".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_queries_answer_without_prompting() {
+        // Neither query may show a prompt or crash; macOS reads TCC through a private symbol
+        // that may be missing, which reports `Undetermined`.
+        let mic = mic_permission();
+        let sys = sys_permission();
+        eprintln!("mic {mic:?}, system audio {sys:?}");
+        assert_eq!(sys_permission(), sys, "stable between calls");
     }
 }

@@ -61,8 +61,6 @@ pub struct EngineConfig {
     pub max_queued_s: f64,
     /// How long a mic final may wait for the system track to confirm or rule out bleed.
     pub mic_wait: Duration,
-    /// Stop recording after this long without speech on either track.
-    pub auto_stop_silence: Option<Duration>,
     pub writer: WriterConfig,
 }
 
@@ -86,7 +84,6 @@ impl EngineConfig {
             idle_unload: Duration::from_secs(10 * 60),
             max_queued_s: 60.0,
             mic_wait: Duration::from_secs(3),
-            auto_stop_silence: Some(Duration::from_secs(15 * 60)),
             writer: WriterConfig::default(),
         }
     }
@@ -109,12 +106,17 @@ impl EngineConfig {
     }
 }
 
+/// The default for [`SessionOptions::auto_stop`].
+pub const AUTO_STOP_SILENCE: Duration = Duration::from_secs(15 * 60);
+
 /// What to record. A track without an opener is not recorded.
 pub struct SessionOptions {
     pub title: String,
     pub language: Option<String>,
     pub mic: Option<OpenSource>,
     pub sys: Option<OpenSource>,
+    /// Stop recording after this long without speech on either track.
+    pub auto_stop: Option<Duration>,
 }
 
 impl SessionOptions {
@@ -134,6 +136,7 @@ impl SessionOptions {
             language: None,
             mic,
             sys,
+            auto_stop: Some(AUTO_STOP_SILENCE),
         }
     }
 }

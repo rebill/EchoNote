@@ -41,7 +41,7 @@ use windows::Win32::System::Variant::VT_BLOB;
 use windows::core::{GUID, Interface, PWSTR, Ref, implement};
 
 use super::ring::{RingConsumer, RingProducer, now_ns, ring};
-use super::{AudioSource, CaptureError, RING_SECONDS, SourceFormat, Stamp};
+use super::{AudioSource, CaptureError, Permission, RING_SECONDS, SourceFormat, Stamp};
 
 const WAVE_FORMAT_PCM: u16 = 1;
 const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
@@ -145,6 +145,45 @@ impl Drop for SystemSource {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+/// The microphone privacy switches (Settings > Privacy & security > Microphone): device-wide
+/// access, access for apps, and access for desktop apps. Any of them off and the microphone
+/// records silence. A missing value means allowed.
+pub fn mic_privacy() -> Permission {
+    use windows::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW,
+    };
+    use windows::core::{HSTRING, w};
+
+    const STORE: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+    let denied = |root: HKEY, key: &str| {
+        let key = HSTRING::from(key);
+        let mut data = [0u16; 16];
+        let mut len = std::mem::size_of_val(&data) as u32;
+        // SAFETY: `data` and `len` describe a valid buffer; the value is a short string.
+        let status = unsafe {
+            RegGetValueW(
+                root,
+                &key,
+                w!("Value"),
+                RRF_RT_REG_SZ,
+                None,
+                Some(data.as_mut_ptr().cast()),
+                Some(&mut len),
+            )
+        };
+        status.is_ok() && String::from_utf16_lossy(&data).trim_end_matches('\0') == "Deny"
+    };
+    let non_packaged = format!(r"{STORE}\NonPackaged");
+    if denied(HKEY_LOCAL_MACHINE, STORE)
+        || denied(HKEY_CURRENT_USER, STORE)
+        || denied(HKEY_CURRENT_USER, &non_packaged)
+    {
+        Permission::Denied
+    } else {
+        Permission::Granted
     }
 }
 

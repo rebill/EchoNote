@@ -66,6 +66,7 @@ fn options(mic: Option<OpenSource>, sys: Option<OpenSource>) -> SessionOptions {
         language: None,
         mic,
         sys,
+        auto_stop: None,
     }
 }
 
@@ -360,6 +361,27 @@ fn pause_leaves_the_paused_time_out_and_ends_the_utterance() {
     assert_eq!(found.len(), 2, "{found:#?}");
     assert!(found[0].end_ms <= 1_500, "{found:#?}");
     assert!(found[1].start_ms >= found[0].end_ms + 300, "{found:#?}");
+}
+
+#[test]
+fn a_long_silence_stops_the_recording() {
+    let dir = TempDir::new();
+    let (engine, events) = Engine::open(config(&dir, FakeModel::default())).unwrap();
+    // One short utterance, then silence for longer than the test waits.
+    let audio = tones(SR, 1, 30.0, &[(0.2, 0.6, 220.0, 0.3)]);
+    let meeting = engine
+        .start(SessionOptions {
+            auto_stop: Some(Duration::from_millis(800)),
+            ..options(Some(once(mono(), audio, Pace::Real)), None)
+        })
+        .unwrap();
+    let seen = until_finished(&events, Duration::from_secs(10));
+    assert!(notices(&seen).contains(&Notice::AutoStopped), "{seen:#?}");
+    let reader = engine.store().reader().unwrap();
+    assert_eq!(segments(&reader, meeting).len(), 1);
+    // Speech ends at 0.6 s and the utterance 0.5 s later; then 0.8 s of silence.
+    let duration = reader.tracks(meeting).unwrap()[0].duration_ms.unwrap();
+    assert!((1_500..4_000).contains(&duration), "{duration}");
 }
 
 #[test]

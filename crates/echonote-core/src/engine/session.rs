@@ -178,6 +178,7 @@ struct Session {
     paused_at: Option<u64>,
     last_levels: Instant,
     last_speech: Instant,
+    auto_stop: Option<Duration>,
     _awake: KeepAwake,
 }
 
@@ -288,6 +289,7 @@ impl Session {
             paused_at: None,
             last_levels: Instant::now(),
             last_speech: Instant::now(),
+            auto_stop: options.auto_stop,
             _awake: KeepAwake::new(),
         };
         session.set_state(SessionState::Recording);
@@ -376,7 +378,7 @@ impl Session {
         if pipeline.region(MIC).is_some() || pipeline.region(SYS).is_some() {
             self.last_speech = Instant::now();
         }
-        if let Some(limit) = self.config.auto_stop_silence
+        if let Some(limit) = self.auto_stop
             && self.last_speech.elapsed() >= limit
         {
             notify(&self.events, self.meeting, Notice::AutoStopped);
