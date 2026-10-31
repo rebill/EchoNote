@@ -42,6 +42,11 @@ impl ModelKind {
         }
     }
 
+    /// The model answers Mandarin in Traditional characters (shown as Simplified).
+    pub fn writes_traditional(self) -> bool {
+        matches!(self, Self::Qwen3Asr)
+    }
+
     /// Whether sherpa-onnx returns per-token start times for this model (checked in M0 for
     /// SenseVoice and Paraformer; unknown models are treated as without).
     pub fn has_token_timestamps(self) -> bool {
@@ -121,20 +126,27 @@ impl OfflineAsr {
         let Some(result) = stream.get_result() else {
             return Transcript::default();
         };
+        let simplify = |text: &str| {
+            if self.kind.writes_traditional() {
+                crate::text::to_simplified(text)
+            } else {
+                text.to_owned()
+            }
+        };
         let tokens = match &result.timestamps {
             Some(starts) if starts.len() == result.tokens.len() => result
                 .tokens
                 .iter()
                 .zip(starts)
                 .map(|(text, start)| Token {
-                    text: text.clone(),
+                    text: simplify(text),
                     start_s: *start,
                 })
                 .collect(),
             _ => Vec::new(),
         };
         Transcript {
-            text: result.text.trim().to_owned(),
+            text: simplify(result.text.trim()),
             tokens,
         }
     }

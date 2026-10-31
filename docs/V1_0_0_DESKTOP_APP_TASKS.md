@@ -146,7 +146,7 @@ Acceptance targets:
 - [ ] Model manager: manifest with URLs, sizes, SHA-256, mirrors; resumable download; atomic install.
 - [x] Verify Qwen3-ASR files against the upstream GitHub release digest before publishing the manifest (`scripts/dev/verify_release_digest.py`: tarball sha256 matches the release; all six files match the manifest by size and SHA-256).
 - [ ] Re-transcribe a saved meeting with the high-accuracy model; keep the previous revision.
-- [ ] Traditional/Simplified output normalization for models that emit Traditional characters.
+- [x] Traditional/Simplified output normalization for models that emit Traditional characters (OpenCC 1.1.9 character table embedded in core, applied to Qwen3-ASR output and its tokens; `scripts/dev/gen_t2s.py` regenerates it).
 - [ ] Tune threads, preview interval, and VAD parameters against the frozen budgets.
 - [ ] 3-hour soak on macOS and on the low-end Windows machine.
 

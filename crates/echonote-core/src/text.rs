@@ -26,6 +26,33 @@ pub fn strip_tags(text: &str) -> String {
     out.trim().to_owned()
 }
 
+/// OpenCC's Traditional-to-Simplified character table (`data/t2s.txt`).
+static T2S: std::sync::OnceLock<std::collections::HashMap<char, char>> = std::sync::OnceLock::new();
+
+fn t2s() -> &'static std::collections::HashMap<char, char> {
+    T2S.get_or_init(|| {
+        include_str!("../data/t2s.txt")
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .flat_map(str::split_whitespace)
+            .filter_map(|pair| {
+                let mut chars = pair.chars();
+                Some((chars.next()?, chars.next()?))
+            })
+            .collect()
+    })
+}
+
+/// Traditional characters as Simplified, one character at a time (models such as Qwen3-ASR
+/// answer in Traditional). Characters with several Simplified forms take the common one, so
+/// a rare word can come out wrong (乾隆 as 干隆); the glossary can fix those.
+pub fn to_simplified(text: &str) -> String {
+    let map = t2s();
+    text.chars()
+        .map(|ch| *map.get(&ch).unwrap_or(&ch))
+        .collect()
+}
+
 pub fn sanitize(text: &str) -> String {
     let text: Vec<char> = text.trim().chars().collect();
     if text.is_empty() {
@@ -193,6 +220,20 @@ mod tests {
         let cut = sanitize(&long);
         assert!(long.starts_with(&cut));
         assert!((MAX_SEGMENT_CHARS - 5..=MAX_SEGMENT_CHARS).contains(&cut.chars().count()));
+    }
+
+    #[test]
+    fn traditional_becomes_simplified() {
+        assert_eq!(
+            to_simplified("我們這個會議時間後來說話開發裡麼"),
+            "我们这个会议时间后来说话开发里么"
+        );
+        assert_eq!(
+            to_simplified("Kubernetes 和 API 不變"),
+            "Kubernetes 和 API 不变"
+        );
+        assert_eq!(to_simplified("简体保持不变。"), "简体保持不变。");
+        assert!(t2s().len() > 4000);
     }
 
     #[test]
