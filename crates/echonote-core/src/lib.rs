@@ -5,6 +5,7 @@
 
 pub mod asr;
 pub mod capture;
+pub mod crosstalk;
 pub mod pipeline;
 pub mod vad;
 

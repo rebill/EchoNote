@@ -19,7 +19,7 @@ pub struct Stats {
     pub forced_splits: usize,
     pub max_queue: usize,
     pub drain_s: f64,
-    pub final_latency_s: Vec<f64>,
+    pub final_latency_s: Vec<(&'static str, f64)>,
     pub queue_wait_s: Vec<f64>,
     pub preview_lag_s: Vec<f64>,
     /// Track name and seconds from speech onset to its first non-empty preview.
@@ -63,6 +63,7 @@ pub struct StatsSummary {
     pub vad_busy_per_audio_s: f64,
     pub drain_after_stop_ms: f64,
     pub final_latency: Distribution,
+    pub final_latency_by_track: BTreeMap<&'static str, Distribution>,
     pub final_queue_wait: Distribution,
     pub preview_lag: Distribution,
     pub first_preview_latency: Distribution,
@@ -74,15 +75,8 @@ pub struct StatsSummary {
 impl Stats {
     pub fn summary(&self, audio_s: f64) -> StatsSummary {
         let per_audio = |value: f64| round3(value / audio_s * 1000.0) / 1000.0;
-        let mut by_track: BTreeMap<&'static str, Vec<f64>> = BTreeMap::new();
-        for &(track, value) in &self.first_preview_s {
-            by_track.entry(track).or_default().push(value);
-        }
-        let first_preview: Vec<f64> = self
-            .first_preview_s
-            .iter()
-            .map(|&(_, value)| value)
-            .collect();
+        let (first_preview, first_preview_by_track) = split_by_track(&self.first_preview_s);
+        let (final_latency, final_latency_by_track) = split_by_track(&self.final_latency_s);
         StatsSummary {
             final_decodes: self.final_decodes,
             preview_decodes: self.preview_decodes,
@@ -98,14 +92,28 @@ impl Stats {
             streaming_busy_per_audio_s: per_audio(self.streaming_s),
             vad_busy_per_audio_s: per_audio(self.vad_s),
             drain_after_stop_ms: round3(self.drain_s * 1000.0),
-            final_latency: distribution(&self.final_latency_s),
+            final_latency: distribution(&final_latency),
+            final_latency_by_track,
             final_queue_wait: distribution(&self.queue_wait_s),
             preview_lag: distribution(&self.preview_lag_s),
             first_preview_latency: distribution(&first_preview),
-            first_preview_latency_by_track: by_track
-                .iter()
-                .map(|(track, values)| (*track, distribution(values)))
-                .collect(),
+            first_preview_latency_by_track: first_preview_by_track,
         }
     }
+}
+
+/// All values, and a distribution per track.
+fn split_by_track(
+    values: &[(&'static str, f64)],
+) -> (Vec<f64>, BTreeMap<&'static str, Distribution>) {
+    let mut by_track: BTreeMap<&'static str, Vec<f64>> = BTreeMap::new();
+    for &(track, value) in values {
+        by_track.entry(track).or_default().push(value);
+    }
+    let all = values.iter().map(|&(_, value)| value).collect();
+    let distributions = by_track
+        .iter()
+        .map(|(track, values)| (*track, distribution(values)))
+        .collect();
+    (all, distributions)
 }

@@ -73,7 +73,8 @@ Acceptance targets:
 - [ ] macOS tap: enable only the tap stream (`kAudioDevicePropertyIOProcStreamUsage`), handle tap format changes, timestamp from `AudioTimeStamp`.
 - [ ] Overload policy: drop previews first; never drop audio or finals; drain on stop.
 - [ ] Port `text_sanitizer` (repeated-run collapse) and its tests from `asr-service`.
-- [ ] Mic/sys duplicate suppression: time-aligned token similarity, token-level trimming, provisional decision from sys previews; double-talk eval set with false-deletion and miss-rate gates.
+- [x] Mic/sys duplicate suppression: time-aligned token matching, token-level trimming, provisional decision from sys previews (`echonote-core::crosstalk`); sys finals decode first.
+- [ ] Recorded double-talk eval set (real speakers and room) with false-deletion and miss-rate gates; the synthetic `meeting-zh-dual` bleed run is the stand-in.
 - [ ] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered.
 - [ ] SQLite store (WAL, migrations, FTS5 trigram) for meetings, tracks, segments, revisions.
 - [ ] Ogg/Opus writer per track with page-level flush, background fsync every 10 s, per-track transcribed-until marker; crash recovery on startup.

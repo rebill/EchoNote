@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use echonote_core::SAMPLE_RATE;
 use echonote_core::asr::{OfflineAsr, StreamingAsr, Transcript};
+use echonote_core::crosstalk::Word;
 use echonote_core::pipeline::{Job, JobKind, Output, Pipeline};
 use serde::Serialize;
 use sherpa_onnx::OnlineStream;
@@ -25,6 +26,9 @@ pub struct FinalSegment {
     pub end_ms: u64,
     pub text: String,
     pub emit_s: f64,
+    /// Tokens on the input timeline, for crosstalk matching.
+    #[serde(skip)]
+    pub words: Vec<Word>,
 }
 
 /// Per-track state the simulation keeps on top of the pipeline: preview latency bookkeeping
@@ -221,17 +225,29 @@ impl<'a> Sim<'a> {
         } = in_flight;
         let end = job.start + job.samples.len();
         match self.pipeline.complete(job, transcript, decode_s) {
-            Some(Output::Final { track, cut, text }) => {
+            Some(Output::Final {
+                track,
+                cut,
+                text,
+                tokens,
+            }) => {
                 self.stats.forced_splits += usize::from(cut.forced);
                 self.stats
                     .final_latency_s
-                    .push(done_s - cut.span_end as f64 / SR);
+                    .push((self.names[track], done_s - cut.span_end as f64 / SR));
                 self.finals.push(FinalSegment {
                     track: self.names[track],
                     start_ms: ms(cut.span_start),
                     end_ms: ms(cut.span_end),
                     text,
                     emit_s: round3(done_s),
+                    words: tokens
+                        .into_iter()
+                        .map(|token| Word {
+                            text: token.text,
+                            at_s: token.at as f64 / SR,
+                        })
+                        .collect(),
                 });
             }
             Some(Output::Preview { track, text, .. }) => {

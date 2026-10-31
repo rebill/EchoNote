@@ -68,8 +68,17 @@ fn run(
     let mut drain = |pipeline: &mut Pipeline, now_s: f64| {
         while let Some(job) = pipeline.next_job(now_s) {
             let transcript = fake_decode(&job, onsets);
-            if let Some(Output::Final { cut, text, .. }) = pipeline.complete(job, transcript, 0.01)
+            if let Some(Output::Final {
+                cut, text, tokens, ..
+            }) = pipeline.complete(job, transcript, 0.01)
             {
+                // Tokens are placed on the timeline and kept only inside the span.
+                assert!(
+                    tokens
+                        .iter()
+                        .all(|token| (cut.span_start..cut.span_end).contains(&token.at))
+                );
+                assert_eq!(super::join_tokens(&tokens), text);
                 finals.push((cut, text));
             }
         }
@@ -212,7 +221,8 @@ fn finals_go_first_and_previews_follow_the_interval_and_priority() {
             track: 1,
             utterance,
             span_start: pipeline.region(1).unwrap().span_start,
-            text: "w0".into()
+            text: "w0".into(),
+            tokens: Vec::new(),
         })
     );
     assert!(pipeline.next_job(0.75 + 0.9).is_none());
@@ -282,4 +292,24 @@ fn memory_stays_bounded_over_a_long_session() {
         "holds {} s",
         pipeline.held(0) / SR
     );
+}
+
+#[test]
+fn finals_of_the_priority_track_are_decoded_first() {
+    let (_, audio) = bursts(2, 1.0);
+    let config = PipelineConfig {
+        previews: false,
+        priority_track: Some(1),
+        ..PipelineConfig::meeting(12.0, 0.0)
+    };
+    let mut pipeline = Pipeline::new(config, vec![detector(), detector()]);
+    // Track 0 finishes an utterance before track 1 does.
+    let half = audio.len() / 2;
+    pipeline.push(0, &audio, 0.0);
+    pipeline.push(1, &audio[..half], 0.0);
+    pipeline.push(1, &audio[half..], 0.0);
+    let order: Vec<usize> = std::iter::from_fn(|| pipeline.next_job(0.0))
+        .map(|job| job.track)
+        .collect();
+    assert_eq!(order, [1, 1, 0, 0]);
 }

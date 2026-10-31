@@ -111,7 +111,7 @@ struct LiveReport {
     logical_cpus: usize,
     accuracy: Vec<score::TrackAccuracy>,
     dedup: Option<score::DedupReport>,
-    /// Dual-track runs without refs: per mic final echo features for manual inspection.
+    /// Dual-track runs: per mic final echo features for manual inspection.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     mic_features: Vec<score::MicFeature>,
     invariants: score::Invariants,
@@ -216,8 +216,8 @@ pub fn run(args: LiveArgs) -> Result<()> {
         ([mic, sys], false) => Some(score::dedup(&sim.finals, &refs, mic, sys, args.cn_numerals)),
         _ => None,
     };
-    let mic_features = match (&tracks[..], refs.is_empty()) {
-        ([mic, sys], true) => score::mic_features(&sim.finals, mic, sys, args.cn_numerals),
+    let mic_features = match &tracks[..] {
+        [mic, sys] => score::mic_features(&sim.finals, mic, sys, args.cn_numerals),
         _ => Vec::new(),
     };
     if let Some(path) = &args.finals_out {

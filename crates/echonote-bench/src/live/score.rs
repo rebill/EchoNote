@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use echonote_core::crosstalk::{CrosstalkConfig, Reference, Verdict};
 use serde::{Deserialize, Serialize};
 
 use super::sim::{FinalSegment, Track};
@@ -120,6 +121,8 @@ pub struct RuleScore {
     pub true_positive: usize,
     pub precision: f64,
     pub recall: f64,
+    /// Finals mostly of the user's own speech that the rule drops entirely (false deletions).
+    pub own_segments_dropped: usize,
     pub mic_error_rate_after: f64,
 }
 
@@ -131,7 +134,8 @@ pub struct DedupReport {
     pub rules: Vec<RuleScore>,
 }
 
-type Rule = fn(&MicFeature) -> bool;
+/// What a rule keeps of a mic final: nothing, or this text.
+type Rule = fn(&MicFeature) -> Option<String>;
 
 /// Echo-detection features of one mic final against the sys track.
 #[derive(Serialize)]
@@ -143,6 +147,12 @@ pub struct MicFeature {
     pub text_sim: f64,
     /// Best Pearson correlation of 20 ms log energy with sys lagged 0 to 200 ms.
     pub energy_corr: f64,
+    /// `echonote_core::crosstalk` against every sys final: keep, trim or duplicate.
+    pub crosstalk: &'static str,
+    pub crosstalk_similarity: f64,
+    /// Text the crosstalk filter keeps; `None` for a duplicate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crosstalk_text: Option<String>,
 }
 
 pub fn mic_features(
@@ -153,6 +163,11 @@ pub fn mic_features(
 ) -> Vec<MicFeature> {
     let mic_energy = log_energy(&mic.samples);
     let sys_energy = log_energy(&sys.samples);
+    let mut reference = Reference::default();
+    for segment in finals.iter().filter(|segment| segment.track == sys.name) {
+        reference.add_final(&segment.words);
+    }
+    let config = CrosstalkConfig::default();
     finals
         .iter()
         .filter(|segment| segment.track == mic.name)
@@ -171,6 +186,12 @@ pub fn mic_features(
             } else {
                 lcs_len(&mic_tokens, &sys_tokens) as f64 / mic_tokens.len() as f64
             };
+            let judgement = reference.judge(&segment.words, &config);
+            let (crosstalk, crosstalk_text) = match judgement.verdict {
+                Verdict::Keep => ("keep", Some(segment.text.clone())),
+                Verdict::Trim { text } => ("trim", Some(text)),
+                Verdict::Duplicate => ("duplicate", None),
+            };
             let first = (segment.start_ms / FRAME_MS) as usize;
             let last = ((segment.end_ms / FRAME_MS) as usize).min(mic_energy.len());
             MicFeature {
@@ -184,6 +205,9 @@ pub fn mic_features(
                     first,
                     last,
                 )),
+                crosstalk,
+                crosstalk_similarity: round3(judgement.similarity),
+                crosstalk_text,
             }
         })
         .collect()
@@ -214,36 +238,63 @@ pub fn dedup(
         .collect();
 
     let before = score_track(mic_finals.iter().copied(), refs, mic.name, cn).error_rate;
-    let rules: [(&'static str, Rule); 3] = [
-        ("text_sim>=0.6", |feature| feature.text_sim >= 0.6),
-        ("energy_corr>=0.8", |feature| feature.energy_corr >= 0.8),
+    let rules: [(&'static str, Rule); 4] = [
+        ("text_sim>=0.6", |feature| {
+            (feature.text_sim < 0.6).then(|| feature.text.clone())
+        }),
+        ("energy_corr>=0.8", |feature| {
+            (feature.energy_corr < 0.8).then(|| feature.text.clone())
+        }),
         ("text>=0.6|(text>=0.3&energy>=0.6)", |feature| {
-            feature.text_sim >= 0.6 || (feature.text_sim >= 0.3 && feature.energy_corr >= 0.6)
+            let flag =
+                feature.text_sim >= 0.6 || (feature.text_sim >= 0.3 && feature.energy_corr >= 0.6);
+            (!flag).then(|| feature.text.clone())
+        }),
+        ("crosstalk(time-aligned)", |feature| {
+            feature.crosstalk_text.clone()
         }),
     ];
+
     let true_bleed = is_bleed.iter().filter(|bleed| **bleed).count();
     let rules = rules
         .iter()
         .map(|(name, rule)| {
-            let flagged: Vec<bool> = features.iter().map(rule).collect();
+            let kept_text: Vec<Option<String>> = features.iter().map(rule).collect();
+            // A trimmed or dropped final counts as flagged.
+            let flagged: Vec<bool> = kept_text
+                .iter()
+                .zip(&features)
+                .map(|(kept, feature)| kept.as_deref() != Some(feature.text.as_str()))
+                .collect();
             let flagged_count = flagged.iter().filter(|value| **value).count();
             let true_positive = is_bleed
                 .iter()
                 .zip(&flagged)
                 .filter(|(bleed, flag)| **flag && **bleed)
                 .count();
-            let kept = mic_finals
+            let own_segments_dropped = kept_text
                 .iter()
-                .zip(&flagged)
-                .filter(|(_, flag)| !**flag)
-                .map(|(segment, _)| *segment);
+                .zip(&is_bleed)
+                .filter(|(kept, bleed)| kept.is_none() && !**bleed)
+                .count();
+            let kept: Vec<FinalSegment> = mic_finals
+                .iter()
+                .zip(kept_text)
+                .filter_map(|(segment, text)| {
+                    text.map(|text| FinalSegment {
+                        text,
+                        ..(*segment).clone()
+                    })
+                })
+                .collect();
             RuleScore {
                 rule: name,
                 flagged: flagged_count,
                 true_positive,
                 precision: round3(true_positive as f64 / flagged_count.max(1) as f64),
                 recall: round3(true_positive as f64 / true_bleed.max(1) as f64),
-                mic_error_rate_after: score_track(kept, refs, mic.name, cn).error_rate,
+                own_segments_dropped,
+                mic_error_rate_after: score_track(kept.iter(), refs, mic.name, cn).error_rate,
             }
         })
         .collect();

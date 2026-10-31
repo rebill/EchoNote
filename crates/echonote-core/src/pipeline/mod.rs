@@ -4,7 +4,9 @@
 //!
 //! Finals always go before previews. Previews are not queued: when the decoder is idle and the
 //! shared preview interval has passed, [`Pipeline::next_job`] builds one from the newest audio,
-//! so a busy decoder skips previews instead of falling behind. Finals are never dropped.
+//! so a busy decoder skips previews instead of falling behind. Finals are never dropped; with a
+//! priority track its finals go first, since the other track's finals wait for them anyway to
+//! rule out crosstalk.
 
 mod detector;
 mod segmenter;
@@ -63,6 +65,14 @@ pub struct Job {
     pub ready_s: f64,
 }
 
+/// A recognized token at its timeline position. Empty for models without token timestamps.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimedToken {
+    pub text: String,
+    /// Timeline index where the token starts.
+    pub at: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     /// Text of the utterance `utterance` so far; ignore it if that utterance has moved on.
@@ -71,11 +81,14 @@ pub enum Output {
         utterance: u64,
         span_start: usize,
         text: String,
+        tokens: Vec<TimedToken>,
     },
     Final {
         track: usize,
         cut: Cut,
         text: String,
+        /// Tokens inside the cut's span.
+        tokens: Vec<TimedToken>,
     },
 }
 /// Recent audio of one track: `samples[0]` is timeline index `base`.
@@ -170,9 +183,16 @@ impl Pipeline {
         trim(state);
         queued
     }
-    /// The next job for an idle decoder: the oldest final, else a preview if one is due.
+    /// The next job for an idle decoder: the oldest final of the priority track, else the
+    /// oldest final, else a preview if one is due.
     pub fn next_job(&mut self, now_s: f64) -> Option<Job> {
-        if let Some(job) = self.finals.pop_front() {
+        let priority = self.config.priority_track;
+        let first = self
+            .finals
+            .iter()
+            .position(|job| Some(job.track) == priority)
+            .unwrap_or(0);
+        if let Some(job) = self.finals.remove(first) {
             return Some(job);
         }
         if !self.config.previews || now_s - self.last_preview_s < self.preview_interval_s {
@@ -216,10 +236,12 @@ impl Pipeline {
         match job.kind {
             JobKind::Final(cut) => {
                 state.finals_in_flight -= 1;
+                let (text, tokens) = stitch(&cut, job.start, &transcript);
                 Some(Output::Final {
                     track: job.track,
                     cut,
-                    text: stitch(&cut, &transcript),
+                    text,
+                    tokens,
                 })
             }
             JobKind::Preview {
@@ -227,10 +249,11 @@ impl Pipeline {
                 span_start,
             } => {
                 self.preview_interval_s = self.config.preview_interval_s.max(2.0 * decode_s);
-                (utterance == state.utterance).then_some(Output::Preview {
+                (utterance == state.utterance).then(|| Output::Preview {
                     track: job.track,
                     utterance,
                     span_start,
+                    tokens: timed(job.start, &transcript),
                     text: transcript.text,
                 })
             }
@@ -319,22 +342,38 @@ fn trim(state: &mut TrackState) {
     }
 }
 
-/// Text of the tokens that start inside the cut's span. Without token timestamps the whole
-/// text is kept; such models must run with zero overlap.
-fn stitch(cut: &Cut, transcript: &Transcript) -> String {
-    let trims_audio = cut.audio_start < cut.span_start || cut.audio_end > cut.span_end;
-    if transcript.tokens.is_empty() || !trims_audio {
-        return transcript.text.clone();
-    }
+/// Tokens on the timeline; `start` is the timeline index of the decoded audio.
+fn timed(start: usize, transcript: &Transcript) -> Vec<TimedToken> {
     let rate = crate::SAMPLE_RATE as f32;
-    let (from, to) = (
-        (cut.span_start - cut.audio_start) as f32 / rate,
-        (cut.span_end - cut.audio_start) as f32 / rate,
-    );
-    let text: String = transcript
+    transcript
         .tokens
         .iter()
-        .filter(|token| token.start_s >= from && token.start_s < to)
+        .map(|token| TimedToken {
+            text: token.text.clone(),
+            at: start + (token.start_s.max(0.0) * rate) as usize,
+        })
+        .collect()
+}
+
+/// Text and tokens of the tokens that start inside the cut's span. Without token timestamps
+/// the whole text is kept; such models must run with zero overlap.
+fn stitch(cut: &Cut, start: usize, transcript: &Transcript) -> (String, Vec<TimedToken>) {
+    let tokens = timed(start, transcript);
+    let trims_audio = cut.audio_start < cut.span_start || cut.audio_end > cut.span_end;
+    if tokens.is_empty() || !trims_audio {
+        return (transcript.text.clone(), tokens);
+    }
+    let kept: Vec<TimedToken> = tokens
+        .into_iter()
+        .filter(|token| token.at >= cut.span_start && token.at < cut.span_end)
+        .collect();
+    (join_tokens(&kept), kept)
+}
+
+/// Text of sherpa tokens; `\u{2581}` marks a word start.
+pub fn join_tokens(tokens: &[TimedToken]) -> String {
+    let text: String = tokens
+        .iter()
         .map(|token| token.text.replace('\u{2581}', " "))
         .collect();
     text.trim().to_owned()

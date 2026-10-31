@@ -2,8 +2,9 @@
 //!
 //! Drives `echonote_core::pipeline` the way the app will: per-track Silero VAD with a 12 s
 //! hard cap, one SenseVoice worker serving both tracks (finals first, one preview slot shared
-//! by both tracks with system audio first), and mic finals that repeat what system audio just
-//! played are marked as crosstalk.
+//! by both tracks with system audio first). Mic finals are compared with system-audio tokens
+//! of the same moment (`echonote_core::crosstalk`): bleed is hidden, and bleed inside the
+//! user's own sentence is trimmed.
 //!
 //! macOS: run through `scripts/dev/live_demo.sh`. Writes mic.wav, sys.wav (16 kHz) and
 //! transcript.jsonl to `<out_dir>` and stops when `<out_dir>/stop` appears. Windows loopback
@@ -33,8 +34,9 @@ mod demo {
     use anyhow::{Context, Result};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use echonote_core::asr::{ModelKind, OfflineAsr, OfflineModelSpec, Transcript};
+    use echonote_core::crosstalk::{CrosstalkConfig, Reference, Verdict, Word};
     use echonote_core::pipeline::{
-        Job, Output, Pipeline, PipelineConfig, SherpaDetector, SpeechDetector,
+        Job, Output, Pipeline, PipelineConfig, SherpaDetector, SpeechDetector, TimedToken,
     };
     use echonote_core::vad::{VadKind, VadSpec};
     use rtrb::{Consumer, RingBuffer};
@@ -50,6 +52,8 @@ mod demo {
     const TICK: Duration = Duration::from_millis(30);
     /// How long a mic final may wait for the system track to confirm or rule out crosstalk.
     const MIC_WAIT: Duration = Duration::from_secs(3);
+    /// System tokens are kept this long for mic finals still waiting in the queue.
+    const REFERENCE_S: f64 = 120.0;
     const MIC: usize = 0;
     const SYS: usize = 1;
 
@@ -330,6 +334,8 @@ mod demo {
         pipeline: Pipeline,
         tracks: [Track; 2],
         jobs: Sender<Job>,
+        /// System-audio tokens for the crosstalk check.
+        reference: Reference,
         started: Instant,
         loaded: bool,
         busy: bool,
@@ -361,8 +367,27 @@ mod demo {
             if track.preview_utterance != utterance {
                 track.preview_utterance = utterance;
                 track.preview.clear();
+                if index == SYS {
+                    self.reference.clear_preview();
+                }
+            }
+            if index == SYS {
+                let sys = &self.tracks[SYS];
+                self.reference
+                    .prune_before(sys.seconds_at(sys.received) - REFERENCE_S);
             }
             Ok(())
+        }
+
+        /// Tokens of a track on the session clock.
+        fn words(&self, track: usize, tokens: Vec<TimedToken>) -> Vec<Word> {
+            tokens
+                .into_iter()
+                .map(|token| Word {
+                    at_s: self.tracks[track].seconds_at(token.at),
+                    text: token.text,
+                })
+                .collect()
         }
 
         /// Give the idle decoder the next job. Nothing is sent while the model loads, so
@@ -378,12 +403,12 @@ mod demo {
         }
 
         fn sys_now(&self) -> SysNow {
-            let sys = &self.tracks[SYS];
-            let region = self.pipeline.region(SYS);
             SysNow {
-                busy: region.is_some() || self.pipeline.pending_finals_of(SYS) > 0,
-                preview_start_s: region.map(|region| sys.seconds_at(region.span_start)),
-                preview: sys.preview.clone(),
+                finals_pending: self.pipeline.pending_finals_of(SYS) > 0,
+                region_start_s: self
+                    .pipeline
+                    .region(SYS)
+                    .map(|region| self.tracks[SYS].seconds_at(region.span_start)),
             }
         }
 
@@ -424,50 +449,12 @@ mod demo {
         out.push_str(rest);
         out.trim().to_owned()
     }
-    /// CJK characters are single tokens; Latin letters and digits form lowercase words.
-    fn tokens(text: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut word = String::new();
-        for ch in text.chars() {
-            if ch.is_ascii_alphanumeric() {
-                word.push(ch.to_ascii_lowercase());
-                continue;
-            }
-            if !word.is_empty() {
-                out.push(std::mem::take(&mut word));
-            }
-            if ch.is_alphanumeric() {
-                out.push(ch.to_string());
-            }
-        }
-        if !word.is_empty() {
-            out.push(word);
-        }
-        out
-    }
-
-    fn lcs(a: &[String], b: &[String]) -> usize {
-        let mut row = vec![0usize; b.len() + 1];
-        for x in a {
-            let mut diagonal = 0;
-            for (j, y) in b.iter().enumerate() {
-                let above = row[j + 1];
-                row[j + 1] = if x == y {
-                    diagonal + 1
-                } else {
-                    row[j + 1].max(row[j])
-                };
-                diagonal = above;
-            }
-        }
-        row[b.len()]
-    }
-
     struct Line {
         track: usize,
         start_s: f64,
         end_s: f64,
         text: String,
+        words: Vec<Word>,
         latency_s: f64,
         arrived: Instant,
     }
@@ -480,10 +467,10 @@ mod demo {
         transcript: BufWriter<File>,
         status: String,
         pending_mic: VecDeque<Line>,
-        recent_sys: VecDeque<Line>,
         latencies: Vec<f64>,
         lines: [usize; 2],
         crosstalk: usize,
+        trimmed: usize,
         busy_s: f64,
     }
 
@@ -507,11 +494,11 @@ mod demo {
         }
         kept.iter().rev().collect()
     }
-    /// What the system track is saying right now, for the crosstalk check.
+    /// Whether system tokens may still arrive, for the crosstalk check.
     struct SysNow {
-        busy: bool,
-        preview_start_s: Option<f64>,
-        preview: String,
+        finals_pending: bool,
+        /// Session time where the system utterance in progress started.
+        region_start_s: Option<f64>,
     }
 
     impl Session {
@@ -537,20 +524,26 @@ mod demo {
             self.print(message, message);
         }
 
-        fn emit(&mut self, line: Line, crosstalk: bool) -> Result<()> {
+        fn emit(&mut self, mut line: Line, verdict: Verdict) -> Result<()> {
+            let hidden = verdict == Verdict::Duplicate;
+            let raw_text = match verdict {
+                Verdict::Trim { text } => Some(std::mem::replace(&mut line.text, text)),
+                _ => None,
+            };
             let stamp = format!(
                 "{:02}:{:02}",
                 line.start_s as u64 / 60,
                 line.start_s as u64 % 60
             );
             let speaker = if line.track == MIC { "我  " } else { "对方" };
-            let plain = format!(
-                "{stamp} {speaker} {}{}",
-                if crosstalk { "[外放串音] " } else { "" },
-                line.text
-            );
-            // Crosstalk is only counted on the status line; transcript.jsonl keeps its text.
-            if !crosstalk {
+            let mark = match (hidden, &raw_text) {
+                (true, _) => "[外放串音] ",
+                (false, Some(_)) => "[已去除串音] ",
+                (false, None) => "",
+            };
+            let plain = format!("{stamp} {speaker} {mark}{}", line.text);
+            // Hidden crosstalk is only counted on the status line; transcript.jsonl keeps it.
+            if !hidden {
                 let color = if line.track == MIC { 36 } else { 33 };
                 let styled = format!("{stamp} \x1b[{color}m{speaker}\x1b[0m {}", line.text);
                 self.print(&styled, &plain);
@@ -559,54 +552,50 @@ mod demo {
                 let _ = writeln!(stdout, "{plain}");
                 let _ = stdout.flush();
             }
+            let crosstalk = match (hidden, &raw_text) {
+                (true, _) => "duplicate",
+                (false, Some(_)) => "trim",
+                (false, None) => "keep",
+            };
             let record = json!({
                 "track": if line.track == MIC { "mic" } else { "sys" },
                 "start_s": (line.start_s * 1000.0).round() / 1000.0,
                 "end_s": (line.end_s * 1000.0).round() / 1000.0,
                 "text": line.text,
-                "crosstalk": crosstalk,
+                "crosstalk": (line.track == MIC).then_some(crosstalk),
+                "raw_text": raw_text,
                 "latency_s": (line.latency_s * 1000.0).round() / 1000.0,
             });
             writeln!(self.transcript, "{record}")?;
             self.transcript.flush()?;
             self.lines[line.track] += 1;
-            self.crosstalk += crosstalk as usize;
+            self.crosstalk += usize::from(hidden);
+            self.trimmed += usize::from(raw_text.is_some());
             self.latencies.push(line.latency_s);
-            if line.track == SYS {
-                self.recent_sys.push_back(line);
-                if self.recent_sys.len() > 50 {
-                    self.recent_sys.pop_front();
-                }
-            }
             self.draw_status();
             Ok(())
         }
+
         /// Emit mic finals once the system track can confirm or rule out crosstalk.
-        fn release_mic(&mut self, sys: &SysNow, force: bool) -> Result<()> {
+        fn release_mic(&mut self, reference: &Reference, sys: &SysNow, force: bool) -> Result<()> {
+            let config = CrosstalkConfig::default();
             while let Some(line) = self.pending_mic.front() {
-                let mic_tokens = tokens(&line.text);
-                let mut sys_tokens: Vec<String> = self
-                    .recent_sys
-                    .iter()
-                    .filter(|other| {
-                        other.end_s >= line.start_s - 0.5 && other.start_s <= line.end_s + 0.5
-                    })
-                    .flat_map(|other| tokens(&other.text))
-                    .collect();
-                if sys
-                    .preview_start_s
-                    .is_some_and(|start| start <= line.end_s + 0.5)
+                let verdict = reference.judge(&line.words, &config).verdict;
+                // System tokens of this moment may still arrive: a queued final, or the
+                // utterance in progress if it started before this line ended.
+                let may_grow = sys.finals_pending
+                    || sys
+                        .region_start_s
+                        .is_some_and(|start| start <= line.end_s + config.max_lag_s);
+                if verdict != Verdict::Duplicate
+                    && may_grow
+                    && !force
+                    && line.arrived.elapsed() < MIC_WAIT
                 {
-                    sys_tokens.extend(tokens(&sys.preview));
-                }
-                let similarity =
-                    lcs(&mic_tokens, &sys_tokens) as f64 / mic_tokens.len().max(1) as f64;
-                let crosstalk = mic_tokens.len() >= 2 && similarity >= 0.6;
-                if !crosstalk && !force && sys.busy && line.arrived.elapsed() < MIC_WAIT {
                     return Ok(());
                 }
                 let line = self.pending_mic.pop_front().unwrap();
-                self.emit(line, crosstalk)?;
+                self.emit(line, verdict)?;
             }
             Ok(())
         }
@@ -614,8 +603,11 @@ mod demo {
         /// One status line that never wraps: the system track's preview while it speaks (the
         /// mic then mostly hears the speakers), otherwise the mic preview.
         fn update_status(&mut self, loaded: bool, sys_speaking: bool, previews: [&str; 2]) {
-            let hidden = if self.crosstalk > 0 {
-                format!("  （已隐藏外放串音 {} 句）", self.crosstalk)
+            let hidden = if self.crosstalk + self.trimmed > 0 {
+                format!(
+                    "  （外放串音：隐藏 {} 句，裁剪 {} 句）",
+                    self.crosstalk, self.trimmed
+                )
             } else {
                 String::new()
             };
@@ -675,13 +667,31 @@ mod demo {
         engine.busy = false;
         session.busy_s += decode_s;
         match engine.pipeline.complete(job, transcript, decode_s) {
-            Some(Output::Preview { track, text, .. }) => {
+            Some(Output::Preview {
+                track,
+                text,
+                tokens,
+                ..
+            }) => {
                 engine.tracks[track].preview = strip_tags(&text);
+                if track == SYS {
+                    let words = engine.words(SYS, tokens);
+                    engine.reference.set_preview(&words);
+                }
             }
-            Some(Output::Final { track, cut, text }) => {
+            Some(Output::Final {
+                track,
+                cut,
+                text,
+                tokens,
+            }) => {
                 let text = strip_tags(&text);
                 if text.is_empty() {
                     return Ok(());
+                }
+                let words = engine.words(track, tokens);
+                if track == SYS {
+                    engine.reference.add_final(&words);
                 }
                 let current = &engine.tracks[track];
                 let end_s = current.seconds_at(cut.span_end);
@@ -690,11 +700,12 @@ mod demo {
                     start_s: current.seconds_at(cut.span_start),
                     end_s,
                     text,
+                    words,
                     latency_s: (current.seconds_at(current.received) - end_s).max(0.0),
                     arrived: Instant::now(),
                 };
                 if track == SYS {
-                    session.emit(line, false)?;
+                    session.emit(line, Verdict::Keep)?;
                 } else {
                     session.pending_mic.push_back(line);
                 }
@@ -754,10 +765,10 @@ mod demo {
             transcript: BufWriter::new(File::create(out_dir.join("transcript.jsonl"))?),
             status: String::new(),
             pending_mic: VecDeque::new(),
-            recent_sys: VecDeque::new(),
             latencies: Vec::new(),
             lines: [0, 0],
             crosstalk: 0,
+            trimmed: 0,
             busy_s: 0.0,
         };
         let started = Instant::now();
@@ -797,6 +808,7 @@ mod demo {
                 Track::new(system, &out_dir.join("sys.wav"))?,
             ],
             jobs,
+            reference: Reference::default(),
             started,
             loaded: false,
             busy: false,
@@ -816,7 +828,7 @@ mod demo {
             }
             engine.pull()?;
             engine.dispatch();
-            session.release_mic(&engine.sys_now(), false)?;
+            session.release_mic(&engine.reference, &engine.sys_now(), false)?;
             let sys_speaking = engine.pipeline.region(SYS).is_some();
             let [mic, sys] = &engine.tracks;
             session.update_status(engine.loaded, sys_speaking, [&mic.preview, &sys.preview]);
@@ -825,7 +837,7 @@ mod demo {
         session.status = "正在转写剩余音频…".to_owned();
         session.draw_status();
         engine.finish(&received, &mut session)?;
-        session.release_mic(&engine.sys_now(), true)?;
+        session.release_mic(&engine.reference, &engine.sys_now(), true)?;
         let Engine { tracks, jobs, .. } = engine;
         drop(jobs);
         let _ = decoder.join();
@@ -846,11 +858,12 @@ mod demo {
             .map(|track| track.source.dropped.load(Ordering::Relaxed))
             .sum();
         let summary = format!(
-            "\n录音 {:.0} s：我 {} 句（其中外放串音 {} 句），对方 {} 句。定稿延迟 p50 {:.2} s，p95 {:.2} s；\
+            "\n录音 {:.0} s：我 {} 句（隐藏外放串音 {} 句，裁剪 {} 句），对方 {} 句。定稿延迟 p50 {:.2} s，p95 {:.2} s；\
              解码占用 {:.2}（两轨合计，1.0 表示解码线程满载）；丢弃样本 {}。\n文件：{}",
             audio_s,
             session.lines[MIC],
             session.crosstalk,
+            session.trimmed,
             session.lines[SYS],
             pick(0.5),
             pick(0.95),
