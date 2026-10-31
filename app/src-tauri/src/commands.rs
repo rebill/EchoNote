@@ -39,6 +39,8 @@ pub struct AppInfo {
     smoke: bool,
     /// The smoke run's mock LLM server (debug builds).
     smoke_llm: Option<String>,
+    /// Model downloads go to a local mirror (debug builds).
+    smoke_mirror: bool,
 }
 
 #[tauri::command]
@@ -50,17 +52,19 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CommandResu
     } else {
         "other"
     };
+    let models = state.models();
     Ok(AppInfo {
         version: app.package_info().version.to_string(),
         platform,
         data_dir: state.data_dir.display().to_string(),
-        model_installed: state.models.asr.is_some(),
-        vad_installed: state.models.vad.is_some(),
+        model_installed: models.asr.is_some(),
+        vad_installed: models.vad.is_some(),
         engine_error: state.engine.as_ref().err().cloned(),
         shortcut_error: lock(&state.shortcut_error).clone(),
         pending_error: lock(&state.pending_error).take(),
         smoke: state.dev.smoke.is_some(),
         smoke_llm: state.dev.smoke_llm.clone(),
+        smoke_mirror: state.dev.model_mirror.is_some(),
     })
 }
 
@@ -164,6 +168,8 @@ pub struct MeetingDetail {
     qa: Vec<crate::ai::jobs::QaView>,
     /// LLM changes waiting for review, with the text before them (as shown).
     corrections: Vec<CorrectionView>,
+    /// Segments the high-accuracy model changed that undo would restore.
+    retranscribed: usize,
 }
 
 #[derive(Serialize)]
@@ -187,6 +193,7 @@ pub async fn get_meeting(state: State<'_, AppState>, id: i64) -> CommandResult<M
                 .latest_summary(id, SummaryKind::Highlights)?
                 .map(Into::into),
             qa: store.qa(id)?.into_iter().map(Into::into).collect(),
+            retranscribed: store.retranscribed(id)?,
             corrections: store
                 .corrections(id)?
                 .into_iter()

@@ -38,6 +38,8 @@ pub enum Kind {
     Answer,
     Correct,
     Highlights,
+    /// The high-accuracy model (not an LLM run, but cancelled and shown the same way).
+    Retranscribe,
 }
 
 impl Kind {
@@ -47,6 +49,7 @@ impl Kind {
             Kind::Answer => "answer",
             Kind::Correct => "correct",
             Kind::Highlights => "highlights",
+            Kind::Retranscribe => "retranscribe",
         }
     }
 }
@@ -74,6 +77,7 @@ pub enum Stage {
     Merging { notes: usize },
     Writing,
     Batches { done: usize, total: usize },
+    Segments { done: usize, total: usize },
 }
 
 /// One `ai` event. Job 0 is live highlights.
@@ -168,7 +172,7 @@ impl Out {
         );
     }
 
-    fn progress(&self, stage: Stage) {
+    pub fn progress(&self, stage: Stage) {
         self.send(Body::Progress(stage));
     }
 
@@ -227,7 +231,7 @@ impl Drop for Finish<'_> {
 }
 
 /// Start `work` as a run of `kind`; returns its job id at once.
-fn spawn<F>(
+pub fn spawn<F>(
     app: &AppHandle,
     meeting: i64,
     kind: Kind,
@@ -297,7 +301,7 @@ pub fn ready(state: &AppState, policy: Policy) -> CommandResult<Ready> {
 }
 
 /// Refuse a meeting that is being recorded or still needs recovering.
-fn idle(state: &AppState, meeting: i64) -> CommandResult<()> {
+pub fn idle(state: &AppState, meeting: i64) -> CommandResult<()> {
     let live = state
         .engine()?
         .state()

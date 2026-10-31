@@ -15,6 +15,8 @@ import type {
   GlossaryEntry,
   MeetingDetail,
   Meeting,
+  ModelEvent,
+  ModelInfo,
   Permissions,
   ProviderInput,
   SearchHit,
@@ -77,6 +79,14 @@ export const api = {
   cancelJob: (job: number) => invoke<void>("cancel_job", { job }),
   runningJobs: () => invoke<{ job: number; meeting: number; kind: AiKind }[]>("running_jobs"),
   getHighlights: (meeting: number) => invoke<SummaryView | null>("get_highlights", { meeting }),
+  asrModels: () => invoke<ModelInfo[]>("asr_models"),
+  /// Progress and the outcome come as `models` events.
+  downloadModel: (id: string) => invoke<void>("download_model", { id }),
+  cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),
+  deleteModel: (id: string) => invoke<void>("delete_model", { id }),
+  /// Returns the job id; progress comes as `ai` events of kind `retranscribe`.
+  retranscribe: (meeting: number) => invoke<number>("retranscribe", { meeting }),
+  revertRetranscription: (meeting: number) => invoke<number>("revert_retranscription", { meeting }),
 };
 
 export const events = {
@@ -88,6 +98,8 @@ export const events = {
     listen<CommandError>("app-error", (event) => handler(event.payload)),
   ai: (handler: (event: AiEvent) => void): Promise<UnlistenFn> =>
     listen<AiEvent>("ai", (event) => handler(event.payload)),
+  models: (handler: (event: ModelEvent) => void): Promise<UnlistenFn> =>
+    listen<ModelEvent>("models", (event) => handler(event.payload)),
 };
 
 /// The meeting's tracks mixed into one WAV (`playback.rs`). Tauri picks the URL form per

@@ -27,6 +27,11 @@ pub struct Retranscription {
     pub total: usize,
     /// Segments whose text changed.
     pub changed: usize,
+    /// Audio decoded so far, and the time spent loading the model and decoding it (reading
+    /// the audio back included), for tuning.
+    pub audio_ms: u64,
+    pub load_ms: u64,
+    pub decode_ms: u64,
 }
 
 fn samples(ms: i64) -> usize {
@@ -127,8 +132,14 @@ pub(super) fn run(
             break Ok(());
         }
         match received.recv_timeout(Duration::from_millis(100)) {
-            Ok(WorkerEvent::Decoded { transcript, .. }) => {
+            Ok(WorkerEvent::Decoded {
+                transcript,
+                decode_s,
+                ..
+            }) => {
                 let segment = sent.pop_front().expect("one result per job, in order");
+                progress.audio_ms += (segment.end_ms - segment.start_ms) as u64;
+                progress.decode_ms += (decode_s * 1_000.0) as u64;
                 let text = sanitize(&strip_tags(&transcript.text));
                 // Nothing heard is not a reason to blank a line the live model heard.
                 if !text.is_empty() {
@@ -146,7 +157,9 @@ pub(super) fn run(
             Ok(WorkerEvent::Skipped { .. }) => {
                 break Err(EngineError::ModelLoad("not loaded".into()));
             }
-            Ok(WorkerEvent::Loaded { .. }) => {}
+            Ok(WorkerEvent::Loaded { seconds, .. }) => {
+                progress.load_ms = (seconds * 1_000.0) as u64
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break Err(EngineError::Stopped),
         }

@@ -9,6 +9,7 @@
   import { app } from "./lib/app.svelte";
   import { errorText, t } from "./lib/i18n.svelte";
   import { asCommandError } from "./lib/ipc";
+  import { models } from "./lib/models.svelte";
 
   let ready = $state(false);
 
@@ -18,6 +19,7 @@
       .then(async () => {
         // AI settings are not needed to show the app.
         await ai.init().catch((error) => app.showError(asCommandError(error)));
+        await models.init().catch((error) => app.showError(asCommandError(error)));
         ready = true;
         if (app.info?.smoke) (await import("./smoke")).run();
       })

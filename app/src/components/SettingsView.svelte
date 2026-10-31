@@ -6,6 +6,7 @@
   import type { Device, Language, Permissions, Settings, StorageUsage } from "../lib/types";
   import AiSettings from "./AiSettings.svelte";
   import GlossaryEditor from "./GlossaryEditor.svelte";
+  import ModelSettings from "./ModelSettings.svelte";
 
   const AUTO_STOP = [0, 5, 15, 30, 60];
 
@@ -109,6 +110,9 @@
       </div>
       <small>{shortcutStatus ?? t("settings.shortcutHint")}</small>
     </div>
+
+    <h2>{t("models.title")}</h2>
+    <ModelSettings />
 
     <h2>{t("glossary.title")}</h2>
     <GlossaryEditor />

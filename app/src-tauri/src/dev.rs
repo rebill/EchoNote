@@ -9,6 +9,8 @@
 //! - `ECHONOTE_EXPORT_DIR`: exports are written here without the save dialog.
 //! - `ECHONOTE_HIGHLIGHTS_SECONDS`: live highlights interval instead of three minutes.
 //! - `ECHONOTE_SMOKE_LLM`: base URL of the smoke run's mock LLM server, for the UI.
+//! - `ECHONOTE_MODEL_MIRROR`: base URL that replaces every model's mirrors and archive (a
+//!   local server, to test downloads).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,6 +23,7 @@ pub struct Dev {
     pub export_dir: Option<PathBuf>,
     pub highlights_interval: Option<Duration>,
     pub smoke_llm: Option<String>,
+    pub model_mirror: Option<String>,
 }
 
 impl Dev {
@@ -39,6 +42,7 @@ impl Dev {
                 .and_then(|seconds| seconds.parse().ok())
                 .map(Duration::from_secs),
             smoke_llm: std::env::var("ECHONOTE_SMOKE_LLM").ok(),
+            model_mirror: std::env::var("ECHONOTE_MODEL_MIRROR").ok(),
         }
     }
 }

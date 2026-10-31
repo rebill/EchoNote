@@ -717,21 +717,11 @@ fn a_meeting_is_transcribed_again_within_its_segments_and_undone() {
             seen.push(progress)
         })
         .unwrap();
+    assert_eq!((done.done, done.total, done.changed), (3, 3, 3));
+    assert!(done.audio_ms > 0 && done.audio_ms < 8_000, "{done:?}");
     assert_eq!(
-        done,
-        Retranscription {
-            done: 3,
-            total: 3,
-            changed: 3
-        }
-    );
-    assert_eq!(
-        seen.first(),
-        Some(&Retranscription {
-            done: 0,
-            total: 3,
-            changed: 0
-        })
+        seen.first().map(|first| (first.done, first.total)),
+        Some((0, 3))
     );
     assert!(seen.windows(2).all(|pair| pair[0].done <= pair[1].done));
     let after = segments(&engine.store().reader().unwrap(), meeting);

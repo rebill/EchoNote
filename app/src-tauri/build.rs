@@ -43,6 +43,12 @@ const COMMANDS: &[&str] = &[
     "cancel_job",
     "running_jobs",
     "get_highlights",
+    "asr_models",
+    "download_model",
+    "cancel_download",
+    "delete_model",
+    "retranscribe",
+    "revert_retranscription",
 ];
 
 fn main() {

@@ -74,6 +74,12 @@ impl From<EngineError> for CommandError {
     }
 }
 
+impl From<echonote_models::ModelError> for CommandError {
+    fn from(error: echonote_models::ModelError) -> Self {
+        Self::new(error.code(), error.to_string())
+    }
+}
+
 impl From<echonote_llm::LlmError> for CommandError {
     /// The message can hold the provider's own words; logs take the code only.
     fn from(error: echonote_llm::LlmError) -> Self {

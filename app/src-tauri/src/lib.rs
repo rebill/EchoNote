@@ -3,6 +3,7 @@
 mod ai;
 mod commands;
 mod dev;
+mod downloads;
 mod edit;
 mod error;
 mod files;
@@ -11,6 +12,7 @@ mod log;
 mod models;
 mod playback;
 mod recording;
+mod retranscribe;
 mod secrets;
 mod settings;
 mod shortcut;
@@ -88,6 +90,12 @@ pub fn run() {
             ai::jobs::cancel_job,
             ai::jobs::running_jobs,
             ai::live::get_highlights,
+            downloads::asr_models,
+            downloads::download_model,
+            downloads::cancel_download,
+            downloads::delete_model,
+            retranscribe::retranscribe,
+            retranscribe::revert_retranscription,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build EchoNote")
@@ -103,7 +111,8 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
     std::fs::create_dir_all(&data_dir)?;
     log::init(&data_dir);
     log!("start {}", app.package_info().version);
-    let models = models::locate(&models::roots(&data_dir, app.path().resource_dir().ok()));
+    let model_roots = models::roots(&data_dir, app.path().resource_dir().ok());
+    let models = models::locate(&model_roots);
     log!(
         "models: asr {}, vad {}",
         models.asr.is_some(),
@@ -123,7 +132,7 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
             (Err(error), None, Settings::default(), AiSettings::default())
         }
     };
-    let state = AppState::new(engine, data_dir, models, settings.clone(), ai, dev);
+    let state = AppState::new(engine, data_dir, model_roots, settings.clone(), ai, dev);
     if state.engine.is_ok()
         && let Err(error) = state.reload_glossary()
     {

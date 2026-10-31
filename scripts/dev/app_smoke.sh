@@ -3,8 +3,10 @@
 # the embedded frontend, plays the first SECONDS of the synthetic meeting-zh-dual set (mic
 # with speaker bleed, and system audio) through the real UI in a scratch library, and prints
 # the UI's report. AI features run against scripts/dev/mock_llm.py on this computer, with
-# keys kept in memory. No microphone, no permission prompts, no keychain, no network; the
-# user's library is not touched.
+# keys kept in memory; model downloads come from the dev models through
+# scripts/dev/model_mirror.py; the high-accuracy pass uses the dev Qwen3-ASR (about 1.3 GB
+# of memory for a minute). No microphone, no permission prompts, no keychain, no network;
+# the user's library is not touched.
 #
 # Usage: scripts/dev/app_smoke.sh [seconds]
 # Needs: $ECHONOTE_DEV_DATA/eval/meeting-zh-dual and models (scripts/dev/fetch_assets.py,
@@ -34,9 +36,17 @@ EOF
 
 python3 "$REPO_ROOT/scripts/dev/mock_llm.py" "$OUT/mock.port" "$OUT/mock.log" &
 mock=$!
-trap 'kill "$mock" 2>/dev/null || true' EXIT
-while [ ! -s "$OUT/mock.port" ]; do sleep 0.1; done
+# Model downloads come from the dev models through a slow local mirror.
+mkdir -p "$OUT/mirror"
+for dir in vad sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25; do
+  [ -d "$DATA_DIR/models/$dir" ] && ln -s "$DATA_DIR/models/$dir" "$OUT/mirror/$dir"
+done
+python3 "$REPO_ROOT/scripts/dev/model_mirror.py" "$OUT/mirror" "$OUT/mirror.port" &
+mirror=$!
+trap 'kill "$mock" "$mirror" 2>/dev/null || true' EXIT
+while [ ! -s "$OUT/mock.port" ] || [ ! -s "$OUT/mirror.port" ]; do sleep 0.1; done
 LLM_URL="http://127.0.0.1:$(cat "$OUT/mock.port")/v1"
+MIRROR_URL="http://127.0.0.1:$(cat "$OUT/mirror.port")"
 
 (cd "$REPO_ROOT/app" && pnpm build >/dev/null)
 cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" -p echonote-app --features custom-protocol
@@ -44,10 +54,11 @@ cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" -p echonote-app --fe
 started=$(date +%s)
 ECHONOTE_DATA_DIR="$OUT/library" ECHONOTE_FAKE_INPUT="$OUT/input" ECHONOTE_SMOKE="$OUT/report.json" \
   ECHONOTE_EXPORT_DIR="$OUT/exports" ECHONOTE_SMOKE_LLM="$LLM_URL" ECHONOTE_HIGHLIGHTS_SECONDS=10 \
+  ECHONOTE_MODEL_MIRROR="$MIRROR_URL" \
   "$REPO_ROOT/target/debug/echonote-app" >"$OUT/stdout.log" 2>"$OUT/stderr.log" &
 pid=$!
-# Real-time playback plus model load, the stop drain and the AI checks.
-limit=$((SECONDS_TO_PLAY + 240))
+# Real-time playback plus model load, the stop drain, the AI checks and the Qwen3-ASR pass.
+limit=$((SECONDS_TO_PLAY + 420))
 while kill -0 "$pid" 2>/dev/null; do
   if [ $(($(date +%s) - started)) -gt "$limit" ]; then
     echo "smoke run timed out after ${limit}s" >&2

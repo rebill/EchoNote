@@ -12,6 +12,7 @@ import type {
   CommandError,
   CorrectOutcome,
   Provider,
+  RetranscribeOutcome,
   Stage,
   SummaryView,
 } from "./types";
@@ -124,6 +125,15 @@ class AiStore {
       this.consent = { provider, meeting, kind, start: () => this.start(meeting, kind, invoke, question) };
       return;
     }
+    this.begin(meeting, kind, invoke, question);
+  }
+
+  /// Start a run that sends nothing anywhere (the high-accuracy model).
+  startLocal(meeting: number, kind: RunKind, invoke: () => Promise<number>): void {
+    this.begin(meeting, kind, invoke, null);
+  }
+
+  private begin(meeting: number, kind: RunKind, invoke: () => Promise<number>, question: string | null): void {
     this.set(meeting, kind, { job: null, status: "running", text: "", stage: null, question, result: null, error: null });
     invoke()
       .then((job) => {
@@ -230,12 +240,19 @@ class AiStore {
         // The meeting view reloads and shows what was saved.
         app.libraryVersion++;
         if (kind === "correct") this.announce(event.result as CorrectOutcome);
+        if (kind === "retranscribe") this.announceRetranscribed(event.result as RetranscribeOutcome);
         break;
       case "error":
+        // A stopped pass keeps what it finished: show it.
+        if (kind === "retranscribe") app.libraryVersion++;
         if (event.error.code === "cancelled") this.set(event.meeting, kind, null);
         else this.patch(event.meeting, kind, { job: event.job, status: "error", error: event.error });
         break;
     }
+  }
+
+  private announceRetranscribed(outcome: RetranscribeOutcome): void {
+    app.toast = outcome.total === 0 ? t("retranscribe.nothing") : t("retranscribe.done", { changed: outcome.changed, total: outcome.total });
   }
 
   private announce(outcome: CorrectOutcome): void {

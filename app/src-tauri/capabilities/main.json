@@ -50,6 +50,12 @@
     "allow-clear-qa",
     "allow-cancel-job",
     "allow-running-jobs",
-    "allow-get-highlights"
+    "allow-get-highlights",
+    "allow-asr-models",
+    "allow-download-model",
+    "allow-cancel-download",
+    "allow-delete-model",
+    "allow-retranscribe",
+    "allow-revert-retranscription"
   ]
 }

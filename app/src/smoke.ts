@@ -5,6 +5,7 @@ import { ai } from "./lib/ai.svelte";
 import { app } from "./lib/app.svelte";
 import { cspViolations } from "./lib/csp";
 import { api, asCommandError, events } from "./lib/ipc";
+import { models } from "./lib/models.svelte";
 import type { MeetingDetail, ProviderInput } from "./lib/types";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -199,6 +200,76 @@ async function checkAi(meeting: number, baseUrl: string): Promise<Record<string,
   return result;
 }
 
+/// Model downloads from the local mirror: the VAD completes; the high-accuracy model is
+/// paused part way and its partial download deleted; a required model cannot be deleted.
+async function checkModels(): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  app.view = { name: "settings" };
+  result.settingsShown = await until(() => !!document.querySelector(".settings .accurate-model"), 5_000);
+  const vad = models.list.find((model) => model.role === "vad");
+  const accurate = models.accurate;
+  if (!vad || !accurate) return result;
+  let progressEvents = 0;
+  const stop = await events.models((event) => {
+    if (event.event === "progress") progressEvents++;
+  });
+  await models.download(vad.id);
+  result.vadDownloaded = await until(
+    () => !models.downloading(vad.id) && !!models.list.find((model) => model.id === vad.id)?.removable,
+    30_000,
+  );
+  result.vadError = models.errors[vad.id]?.code ?? null;
+  result.requiredRefused = await api.deleteModel(vad.id).then(
+    () => false,
+    (error) => asCommandError(error).code === "model-required",
+  );
+
+  await models.download(accurate.id);
+  await until(() => (models.progress[accurate.id]?.done ?? 0) > 0, 30_000);
+  await models.cancel(accurate.id);
+  result.paused = await until(() => !models.downloading(accurate.id), 10_000);
+  const partial = models.accurate?.partial ?? 0;
+  result.partialKept = partial > 0 && partial < accurate.size;
+  result.pauseError = models.errors[accurate.id]?.code ?? null;
+  await models.remove(accurate.id);
+  result.partialDeleted = (models.accurate?.partial ?? -1) === 0;
+  result.progressEvents = progressEvents;
+  stop();
+  return result;
+}
+
+/// The high-accuracy pass over the meeting (the dev data's Qwen3-ASR), then undo. Reports
+/// counts and booleans only.
+async function checkRetranscribe(meeting: number): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = { modelInstalled: models.accurate?.installed ?? false };
+  app.view = { name: "meeting", id: meeting, focus: null };
+  await until(() => !!document.querySelector(".detail .tabs"), 5_000);
+  tab(1)?.click();
+  await sleep(200);
+  const button = document.querySelector<HTMLButtonElement>(".detail .retranscribe");
+  result.buttonEnabled = !!button && !button.disabled;
+  if (!button || button.disabled) return result;
+  const before = (await api.getMeeting(meeting)).segments.map((segment) => segment.text);
+  const started = performance.now();
+  button.click();
+  result.finished = await until(() => ai.run(meeting, "retranscribe")?.status !== "running", 180_000);
+  result.seconds = Math.round((performance.now() - started) / 100) / 10;
+  const run = ai.run(meeting, "retranscribe");
+  result.status = run?.status ?? null;
+  result.error = run?.error?.code ?? null;
+  result.outcome = run?.result ?? null;
+  const after = await api.getMeeting(meeting);
+  result.retranscribed = after.retranscribed;
+  result.changedText = after.segments.filter((segment, i) => segment.text !== before[i]).length;
+  result.undoShown = await until(() => !!document.querySelector(".detail .undo-retranscribe"), 5_000);
+  document.querySelector<HTMLButtonElement>(".detail .undo-retranscribe")?.click();
+  result.undone = await until(() => !document.querySelector(".detail .undo-retranscribe"), 10_000);
+  const restored = (await api.getMeeting(meeting)).segments.map((segment) => segment.text);
+  result.textRestored = restored.length === before.length && restored.every((text, i) => text === before[i]);
+  ai.clear(meeting, "retranscribe");
+  return result;
+}
+
 export async function run(): Promise<void> {
   const report: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const deltaTimes: number[] = [];
@@ -236,6 +307,8 @@ export async function run(): Promise<void> {
       report.playback = await checkPlayback(detail);
       report.editing = await checkEditing();
       if (llm) report.ai = await checkAi(meeting, llm);
+      if (app.info?.smokeMirror) report.models = await checkModels();
+      report.retranscribe = await checkRetranscribe(meeting);
       report.exportDelete = await checkExportAndDelete(meeting);
     }
     const gaps = deltaTimes.slice(1).map((time, i) => time - deltaTimes[i]!);

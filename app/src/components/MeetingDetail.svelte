@@ -5,6 +5,7 @@
   import { locale, t } from "../lib/i18n.svelte";
   import { api, asCommandError, audioUrl } from "../lib/ipc";
   import { hasOtherSpeech, replaceSegment, segmentRows } from "../lib/live";
+  import { models } from "../lib/models.svelte";
   import type { MeetingDetail, Segment } from "../lib/types";
   import ConsentBanner from "./ConsentBanner.svelte";
   import QaPanel from "./QaPanel.svelte";
@@ -94,6 +95,23 @@
 
   function correct() {
     ai.start(id, "correct", () => api.correctMeeting(id));
+  }
+
+  const retranscribing = $derived(ai.run(id, "retranscribe"));
+  const accurateReady = $derived(models.accurate?.installed ?? false);
+
+  function retranscribe() {
+    ai.startLocal(id, "retranscribe", () => api.retranscribe(id));
+  }
+
+  async function undoRetranscribe() {
+    try {
+      const restored = await api.revertRetranscription(id);
+      app.toast = t("retranscribe.undone", { n: restored });
+      app.libraryVersion++;
+    } catch (error) {
+      app.showError(asCommandError(error));
+    }
   }
 
   async function keep(segment: number | null) {
@@ -245,6 +263,42 @@
         <p class="placeholder">{t("detail.empty")}</p>
       {:else}
         <div class="transcript-tab">
+          {#if !recording}
+            <div class="ai-bar">
+              {#if retranscribing?.status === "running"}
+                <button class="stop-retranscribe" disabled={retranscribing.job == null} onclick={() => ai.cancel(id, "retranscribe")}>
+                  {t("retranscribe.stop")}
+                </button>
+                <span class="muted">
+                  {retranscribing.stage?.stage === "segments" && retranscribing.stage.done > 0
+                    ? t("retranscribe.progress", { done: retranscribing.stage.done, total: retranscribing.stage.total })
+                    : t("retranscribe.loading")}
+                </span>
+              {:else}
+                <button
+                  class="link retranscribe"
+                  disabled={!accurateReady || app.recording}
+                  title={accurateReady ? t("retranscribe.hint") : t("retranscribe.needModel")}
+                  onclick={retranscribe}
+                >
+                  {t("retranscribe.run")}
+                </button>
+                {#if !accurateReady}
+                  <button class="link" onclick={() => (app.view = { name: "settings" })}>{t("retranscribe.getModel")}</button>
+                {/if}
+                {#if detail.retranscribed > 0}
+                  <button class="link undo-retranscribe" title={t("retranscribe.undoHint")} onclick={undoRetranscribe}>
+                    {t("retranscribe.undo", { n: detail.retranscribed })}
+                  </button>
+                {/if}
+              {/if}
+              {#if retranscribing?.status === "error" && retranscribing.error}
+                <span class="bad">
+                  {retranscribing.error.code === "busy" ? t("retranscribe.interrupted") : aiErrorText(retranscribing.error)}
+                </span>
+              {/if}
+            </div>
+          {/if}
           {#if !recording && ai.active}
             <div class="ai-bar">
               {#if correcting?.status === "running"}

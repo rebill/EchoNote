@@ -18,6 +18,7 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 echonote-core = { path = "../../crates/echonote-core" }
 echonote-llm = { path = "../../crates/echonote-llm" }
+echonote-models = { path = "../../crates/echonote-models" }
 # API keys: macOS Keychain and Windows Credential Manager only, never a file.
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 serde.workspace = true

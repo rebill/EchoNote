@@ -1177,6 +1177,7 @@ version = "1.0.0-alpha.0"
 dependencies = [
  "echonote-core",
  "echonote-llm",
+ "echonote-models",
  "keyring",
  "serde",
  "serde_json",

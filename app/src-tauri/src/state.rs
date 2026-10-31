@@ -1,5 +1,6 @@
 //! State shared by commands, the tray, the shortcut and the event forwarder.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -13,7 +14,6 @@ use crate::ai::jobs::Jobs;
 use crate::dev::Dev;
 use crate::error::{CommandError, CommandResult};
 use crate::live::Forwarder;
-use crate::models::Located;
 use crate::secrets::Secrets;
 use crate::settings::Settings;
 
@@ -22,7 +22,10 @@ pub struct AppState {
     /// directory is not writable).
     pub engine: Result<Arc<Engine>, CommandError>,
     pub data_dir: PathBuf,
-    pub models: Located,
+    /// The `models/` directories searched, the data directory's first (downloads go there).
+    pub model_roots: Vec<PathBuf>,
+    /// Model downloads in progress, by manifest id.
+    pub downloads: Mutex<HashMap<String, echonote_models::Cancel>>,
     pub settings: Mutex<Settings>,
     pub live: Arc<Mutex<Forwarder>>,
     pub dev: Dev,
@@ -49,7 +52,7 @@ impl AppState {
     pub fn new(
         engine: Result<Arc<Engine>, CommandError>,
         data_dir: PathBuf,
-        models: Located,
+        model_roots: Vec<PathBuf>,
         settings: Settings,
         ai: AiSettings,
         dev: Dev,
@@ -66,7 +69,8 @@ impl AppState {
             jobs: Jobs::default(),
             engine,
             data_dir,
-            models,
+            model_roots,
+            downloads: Mutex::default(),
             settings: Mutex::new(settings),
             live: Arc::new(Mutex::new(Forwarder::default())),
             dev,
@@ -80,6 +84,11 @@ impl AppState {
 
     pub fn engine(&self) -> CommandResult<&Arc<Engine>> {
         self.engine.as_ref().map_err(Clone::clone)
+    }
+
+    /// Where the live model and the VAD are now (a repair download may have added them).
+    pub fn models(&self) -> crate::models::Located {
+        crate::models::locate(&self.model_roots)
     }
 
     pub fn settings(&self) -> Settings {

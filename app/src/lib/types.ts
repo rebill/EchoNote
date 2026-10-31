@@ -79,6 +79,8 @@ export interface MeetingDetail {
   qa: QaTurn[];
   /// LLM changes waiting for review, with the text before them.
   corrections: { segmentId: number; previousText: string }[];
+  /// Segments the high-accuracy model changed that undo would restore.
+  retranscribed: number;
 }
 
 export interface SummaryView {
@@ -157,13 +159,49 @@ export interface AiSettings {
   templates: Template[];
 }
 
-export type AiKind = "notes" | "answer" | "correct" | "highlights";
+export type AiKind = "notes" | "answer" | "correct" | "highlights" | "retranscribe";
 
 export type Stage =
   | { stage: "parts"; done: number; total: number }
   | { stage: "merging"; notes: number }
   | { stage: "writing" }
-  | { stage: "batches"; done: number; total: number };
+  | { stage: "batches"; done: number; total: number }
+  | { stage: "segments"; done: number; total: number };
+
+export interface RetranscribeOutcome {
+  done: number;
+  total: number;
+  changed: number;
+}
+
+export type ModelRole = "live" | "vad" | "accurate";
+
+/// A model in the built-in manifest (`asr_models`).
+export interface ModelInfo {
+  id: string;
+  role: ModelRole;
+  size: number;
+  memoryMb: number;
+  license: string;
+  installed: boolean;
+  /// Downloaded into the data directory (delete can remove it).
+  removable: boolean;
+  /// Bytes kept from an unfinished download.
+  partial: number;
+  downloading: boolean;
+}
+
+export interface ModelProgress {
+  stage: "downloading" | "extracting";
+  done: number;
+  total: number;
+}
+
+/// `models` event.
+export type ModelEvent =
+  | ({ event: "progress"; id: string } & ModelProgress)
+  | { event: "done"; id: string }
+  | { event: "error"; id: string; error: CommandError };
 
 export interface CorrectOutcome {
   applied: number;
@@ -210,6 +248,7 @@ export interface AppInfo {
   pendingError: CommandError | null;
   smoke: boolean;
   smokeLlm: string | null;
+  smokeMirror: boolean;
 }
 
 export type Language = "zh-CN" | "en";
