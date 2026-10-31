@@ -1,7 +1,7 @@
 // Typed wrappers for the Rust commands and events. Argument names are camelCase here and
 // snake_case in Rust; Tauri converts them.
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
@@ -45,6 +45,12 @@ export const events = {
   appError: (handler: (error: CommandError) => void): Promise<UnlistenFn> =>
     listen<CommandError>("app-error", (event) => handler(event.payload)),
 };
+
+/// The meeting's tracks mixed into one WAV (`playback.rs`). Tauri picks the URL form per
+/// platform: `echonote-audio://localhost/<id>` or `https://echonote-audio.localhost/<id>`.
+export function audioUrl(meetingId: number): string {
+  return convertFileSrc(String(meetingId), "echonote-audio");
+}
 
 /// Commands reject with a CommandError; anything else becomes one.
 export function asCommandError(error: unknown): CommandError {

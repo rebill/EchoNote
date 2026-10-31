@@ -60,6 +60,9 @@ export const zh = {
   "detail.bleedTag": "串音",
   "detail.recording": "这场会议正在录音。",
   "detail.openLive": "查看实时转录",
+  "detail.playFrom": "从这里播放",
+  "detail.playbackRecording": "录音结束后可以回放。",
+  "detail.noAudio": "这场会议没有可播放的录音。",
 
   "settings.title": "设置",
   "settings.general": "通用",
@@ -166,6 +169,9 @@ export const en: Record<StringKey, string> = {
   "detail.bleedTag": "Bleed",
   "detail.recording": "This meeting is being recorded.",
   "detail.openLive": "Open the live transcript",
+  "detail.playFrom": "Play from here",
+  "detail.playbackRecording": "Playback is available after the recording stops.",
+  "detail.noAudio": "This meeting has no playable audio.",
 
   "settings.title": "Settings",
   "settings.general": "General",

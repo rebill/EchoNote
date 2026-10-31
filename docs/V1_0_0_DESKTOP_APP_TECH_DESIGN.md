@@ -260,6 +260,13 @@ M1 长文件跳转（`scripts/dev/webview_seek_probe.sh`，macOS 15.7.7 系统 W
 
 WebKit 不给 Ogg 建索引，按平均码率把时间换算成字节位置，VBR 加上长时间静音就会错得很远，20 分钟的文件已经差 19–24 s。所以回放改为：Tauri 自定义协议从 Ogg/Opus 现场解码，输出 16 kHz 16 位单声道 WAV（两轨混成一路），把 Range 请求换算成样本位置，用 `Reader::open_at` 只解码请求的区间。WAV 每秒 32 KB，`<audio>` 的时长和跳转都按字节精确换算。录音文件格式不变；WebView2 走同一条路径，两个平台行为一致。协议只接收会议 id，作用域限定在 `meetings/` 目录。点击段落跳转的精度（目标 ±100 ms）在 M3 的应用里复测，macOS 14.2 的 WebKit 仍未验证。
 
+M3 实现：
+
+- `echonote-core::recording::playback`：`MixedWav` 按字节区间解码，各轨样本相加后限幅到 16 位，缺失的轨按静音处理；区间可以从头部或半个样本中间开始。`parse_range` 处理 `bytes=` 区间（含后缀形式），多个区间只返回第一个，越界或格式错误返回 416。每次响应最多 2 MiB（约 65 s 音频），播放器自己续请求。
+- 应用的 `echonote-audio` 协议在阻塞线程池里处理：从库里查轨道，文件名只取 `file_name()` 拼到该会议目录下；时长取各轨最长的 `duration_ms`。录音期间返回 409，界面隐藏播放器并提示录音结束后可回放（系统音频 tap 会录到 WebKit 进程的声音）。响应带 `Cache-Control: no-store`，会议时长变化（恢复补转）时播放器重建。
+- 暂停的时间不进时间线，录音文件也是连续的，所以段落的 `start_ms` 直接就是文件里的位置。
+- 点击段落时间戳：等 `loadedmetadata` 后设 `currentTime` 再播放。冒烟测试（静音点击第三条）：45 s 的会议，`duration` 45.29 s 与轨长一致，跳到 5.798 s 后 `currentTime` 5.80 s，15 ms 内开始播放，没有 CSP 违规。
+
 ## 13. 其他模块
 
 **模型管理**：清单记录 id、版本、文件、大小、sha256 和镜像地址（ModelScope 优先，其次 Hugging Face、GitHub）。下载断点续传，校验后原子改名，下载前检查磁盘空间。沿用 `scripts/dev/fetch_assets.py` 的逻辑，改用 Rust reqwest，跟随系统代理。

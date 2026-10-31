@@ -6,6 +6,7 @@ mod error;
 mod live;
 mod log;
 mod models;
+mod playback;
 mod recording;
 mod settings;
 mod shortcut;
@@ -34,6 +35,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .on_menu_event(tray::on_menu)
+        .register_asynchronous_uri_scheme_protocol(playback::SCHEME, playback::handle)
         .setup(move |app| setup(app, dev))
         .invoke_handler(tauri::generate_handler![
             commands::app_info,

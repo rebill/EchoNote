@@ -355,3 +355,73 @@ fn readable_follows_written_pages_and_flush() {
     assert_eq!(writer.finish().unwrap(), 2 * audio.len() as u64);
     assert_eq!(probe(&path).unwrap().samples, 2 * audio.len() as u64);
 }
+
+#[test]
+fn mixed_wav_ranges_decode_the_sum_of_the_tracks() {
+    use super::playback::{HEADER_LEN, MAX_CHUNK, MixedWav, Unsatisfiable, parse_range};
+    use crate::SAMPLE_RATE;
+
+    let dir = TempDir::new();
+    let (a, b) = (dir.path().join("mic.opus"), dir.path().join("sys.opus"));
+    let first = speech(3 * SAMPLE_RATE as usize);
+    let second: Vec<f32> = speech(2 * SAMPLE_RATE as usize)
+        .iter()
+        .map(|x| x * 0.5)
+        .collect();
+    record(&a, &first, WriterConfig::default());
+    record(&b, &second, WriterConfig::default());
+    let wav = MixedWav {
+        tracks: vec![a.clone(), b.clone(), dir.path().join("missing.opus")],
+        samples: first.len() as u64,
+    };
+    let whole = wav.read(0, wav.len() - 1).unwrap();
+    assert_eq!(whole.len() as u64, wav.len());
+    // A WAV reader agrees with the header, and the samples are the clamped sum.
+    let mut reader = hound::WavReader::new(std::io::Cursor::new(&whole)).unwrap();
+    assert_eq!(reader.spec().sample_rate, SAMPLE_RATE);
+    let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
+    assert_eq!(samples.len(), first.len());
+    let (da, db) = (
+        decode_range(&a, 0, u64::MAX).unwrap(),
+        decode_range(&b, 0, u64::MAX).unwrap(),
+    );
+    for i in [100, 20_000, 40_000] {
+        let expected =
+            ((da[i] + db.get(i).copied().unwrap_or(0.0)).clamp(-1.0, 1.0) * 32_767.0) as i16;
+        assert_eq!(samples[i], expected, "sample {i}");
+    }
+    // Pieces at odd byte offsets (inside the header, mid-sample) put together are the same.
+    let mut pieces = Vec::new();
+    let mut at = 0u64;
+    for len in [7, 40, 1_001, 33_333, u64::MAX] {
+        let end = at.saturating_add(len).saturating_sub(1).min(wav.len() - 1);
+        pieces.extend(wav.read(at, end).unwrap());
+        at = end + 1;
+        if at >= wav.len() {
+            break;
+        }
+    }
+    assert_eq!(pieces, whole);
+    assert_eq!(&whole[..4], b"RIFF");
+    assert_eq!(HEADER_LEN, 44);
+
+    let len = wav.len();
+    assert_eq!(parse_range(Some("bytes=0-"), len), Ok((0, len - 1)));
+    assert_eq!(parse_range(Some("bytes=10-19"), len), Ok((10, 19)));
+    assert_eq!(parse_range(Some("bytes=-4"), len), Ok((len - 4, len - 1)));
+    assert_eq!(parse_range(Some("bytes=0-1"), len), Ok((0, 1)));
+    assert_eq!(
+        parse_range(Some("bytes=5-999999999"), len),
+        Ok((5, len - 1))
+    );
+    assert_eq!(
+        parse_range(Some(&format!("bytes={len}-")), len),
+        Err(Unsatisfiable)
+    );
+    assert_eq!(parse_range(Some("items=0-1"), len), Err(Unsatisfiable));
+    assert_eq!(parse_range(None, len), Ok((0, len - 1)));
+    assert_eq!(
+        parse_range(Some("bytes=0-"), 100 * MAX_CHUNK),
+        Ok((0, MAX_CHUNK - 1))
+    );
+}

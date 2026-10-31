@@ -15,6 +15,7 @@
 //! any position so the untranscribed tail can be recovered.
 
 mod ogg;
+pub mod playback;
 mod reader;
 mod sync;
 #[cfg(test)]

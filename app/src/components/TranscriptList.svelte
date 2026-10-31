@@ -9,6 +9,7 @@
     labels,
     follow = false,
     focus = null,
+    onSeek,
   }: {
     rows: TranscriptRow[];
     /// Show "我"/"对方" (only when the other side spoke).
@@ -17,6 +18,8 @@
     follow?: boolean;
     /// Scroll to this segment once.
     focus?: number | null;
+    /// Makes the timestamps buttons that play from there.
+    onSeek?: (startMs: number) => void;
   } = $props();
 
   const layout = new Layout(52);
@@ -96,7 +99,13 @@
           data-key={row.key}
           use:measure
         >
-          <span class="time">{clock(row.startMs)}</span>
+          {#if onSeek && !row.preview}
+            <button class="time seek" title={t("detail.playFrom")} onclick={() => onSeek(row.startMs)}>
+              {clock(row.startMs)}
+            </button>
+          {:else}
+            <span class="time">{clock(row.startMs)}</span>
+          {/if}
           {#if labels}
             <span class="speaker" class:other={row.track === "sys"}>
               {row.track === "sys" ? t("live.other") : t("live.me")}
@@ -141,6 +150,18 @@
     font-variant-numeric: tabular-nums;
     font-size: 12px;
     color: var(--muted);
+  }
+  .seek {
+    padding: 0;
+    border: none;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  .seek:hover,
+  .seek:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .speaker {
     font-size: 12px;

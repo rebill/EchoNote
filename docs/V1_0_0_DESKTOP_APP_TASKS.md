@@ -114,7 +114,7 @@ Acceptance targets:
 
 ## M3 Playback, Editing, Export
 
-- [ ] Playback via the M0 Spike E decision; click a segment to seek.
+- [x] Playback via the M0 Spike E decision; click a segment to seek (custom protocol decodes the Ogg/Opus tracks to a mixed WAV per range; smoke run lands within 0.01 s of the segment start).
 - [ ] Segment editing with revisions and revert.
 - [ ] Glossary: rule replacements applied to display text; stored for hotwords and LLM prompts.
 - [ ] Markdown and TXT export; remember the last folder.

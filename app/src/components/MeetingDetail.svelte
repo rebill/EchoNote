@@ -2,7 +2,7 @@
   import { app } from "../lib/app.svelte";
   import { dateTime, duration } from "../lib/format";
   import { locale, t } from "../lib/i18n.svelte";
-  import { api, asCommandError } from "../lib/ipc";
+  import { api, asCommandError, audioUrl } from "../lib/ipc";
   import { hasOtherSpeech, segmentRows } from "../lib/live";
   import type { MeetingDetail } from "../lib/types";
   import TranscriptList from "./TranscriptList.svelte";
@@ -40,6 +40,30 @@
   const hiddenCount = $derived(detail ? detail.segments.filter((s) => s.crosstalk === "duplicate").length : 0);
   const labels = $derived(detail ? hasOtherSpeech(detail.segments) : false);
   const recording = $derived(app.recording && app.live?.meeting === id);
+  const hasAudio = $derived(detail ? detail.tracks.some((track) => (track.durationMs ?? 0) > 0) : false);
+  let audio = $state<HTMLAudioElement>();
+  let audioFailed = $state(false);
+  const playable = $derived(hasAudio && !app.recording && !audioFailed);
+
+  $effect(() => {
+    void id;
+    audioFailed = false;
+  });
+
+  // Seeking before the metadata arrives is ignored by some engines, so wait for it.
+  function seek(startMs: number) {
+    const player = audio;
+    if (!player) return;
+    const play = () => {
+      player.currentTime = startMs / 1000;
+      player.play().catch(() => {});
+    };
+    if (player.readyState >= HTMLMediaElement.HAVE_METADATA) play();
+    else {
+      player.addEventListener("loadedmetadata", play, { once: true });
+      player.load();
+    }
+  }
 
   async function rename() {
     editing = false;
@@ -80,6 +104,22 @@
         {t("detail.recording")}
         <button class="link" onclick={() => (app.view = { name: "live" })}>{t("detail.openLive")}</button>
       </div>
+    {:else if app.recording && hasAudio}
+      <!-- The system-audio tap would record the playback. -->
+      <p class="player-note">{t("detail.playbackRecording")}</p>
+    {:else if hasAudio && !audioFailed}
+      {#key `${id}:${detail.meeting.durationMs}`}
+        <audio
+          class="player"
+          controls
+          preload="metadata"
+          src={audioUrl(id)}
+          bind:this={audio}
+          onerror={() => (audioFailed = true)}
+        ></audio>
+      {/key}
+    {:else if hasAudio}
+      <p class="player-note">{t("detail.noAudio")}</p>
     {/if}
 
     <div class="tabs" role="tablist">
@@ -103,7 +143,7 @@
       {:else if rows.length === 0}
         <p class="placeholder">{t("detail.empty")}</p>
       {:else}
-        <TranscriptList {rows} {labels} {focus} />
+        <TranscriptList {rows} {labels} {focus} onSeek={playable ? seek : undefined} />
       {/if}
     </div>
   </section>
@@ -151,6 +191,17 @@
     border-radius: 6px;
     font-size: 13px;
     background: var(--info-bg);
+  }
+  .player {
+    display: block;
+    width: calc(100% - 40px);
+    height: 36px;
+    margin: 0 20px 8px;
+  }
+  .player-note {
+    margin: 0 20px 8px;
+    font-size: 13px;
+    color: var(--muted);
   }
   .tabs {
     display: flex;

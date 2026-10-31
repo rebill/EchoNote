@@ -10,6 +10,8 @@
 //!     Duration, whether the writer finished, and any torn tail (what crash recovery sees).
 //! decode <file.opus> <out.wav> [start_s] [end_s]
 //!     Decode a range of the track timeline to a 16-bit WAV.
+//! playback <file.opus> <start_s>
+//!     Time a 2 MB playback range (`recording::playback`) starting at `start_s`.
 //! timecode <out.opus> <seconds> [out.wav]
 //!     Write a recording-format file (and optionally the same audio as WAV) whose pitch
 //!     encodes the position. Step `k` lasts 0.2 s; in each 5 s cycle `c = k / 25` the first
@@ -61,13 +63,37 @@ fn main() -> Result<()> {
             println!("{} samples to {}", samples.len(), output.display());
             Ok(())
         }
+        Some("playback") => {
+            let usage = "usage: opus_tool playback <file.opus> <start_s>";
+            let input = PathBuf::from(args.next().context(usage)?);
+            let start_s: f64 = args.next().context(usage)?.parse()?;
+            let probe = probe(&input)?;
+            let wav = echonote_core::recording::playback::MixedWav {
+                tracks: vec![input],
+                samples: probe.samples,
+            };
+            let start = 44 + 2 * (start_s * SAMPLE_RATE as f64) as u64;
+            let started = Instant::now();
+            let bytes = wav.read(
+                start,
+                start + echonote_core::recording::playback::MAX_CHUNK - 1,
+            )?;
+            println!(
+                "{} bytes in {:.0} ms",
+                bytes.len(),
+                started.elapsed().as_secs_f64() * 1e3
+            );
+            Ok(())
+        }
         Some("timecode") => {
             let usage = "usage: opus_tool timecode <out.opus> <seconds> [out.wav]";
             let output = PathBuf::from(args.next().context(usage)?);
             let seconds: f64 = args.next().context(usage)?.parse()?;
             timecode(&output, seconds, args.next().map(PathBuf::from).as_deref())
         }
-        _ => bail!("usage: opus_tool roundtrip|probe|decode|timecode … (see the file header)"),
+        _ => bail!(
+            "usage: opus_tool roundtrip|probe|decode|playback|timecode … (see the file header)"
+        ),
     }
 }
 
