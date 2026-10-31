@@ -602,3 +602,95 @@ fn llm_corrections_are_reviewed_kept_or_reverted() {
         ("用 Kubernetes 部署", Source::Llm)
     );
 }
+
+#[test]
+fn a_retranscription_pass_is_applied_and_undone_except_where_edited() {
+    let dir = TempDir::new();
+    let (mut store, id) = meeting(&dir);
+    let ids = store
+        .commit_finals(
+            id,
+            &[
+                final_(TrackKind::Mic, 0, "发到飞鼠群里"),
+                final_(TrackKind::Sys, 1_000, "用库伯内特斯部署"),
+                final_(TrackKind::Mic, 2_000, "第三句"),
+                final_(TrackKind::Sys, 3_000, "不变"),
+            ],
+            &[],
+        )
+        .unwrap();
+    let again = |segment: i64, revision: u32, text: &str| Retranscribed {
+        segment,
+        revision,
+        text: text.into(),
+    };
+    // The third was edited after it was read: skipped.
+    store
+        .edit_segment(ids[2], "第三句话", Source::User)
+        .unwrap();
+    let applied = store
+        .apply_retranscription(
+            id,
+            "qwen3",
+            &[
+                again(ids[0], 1, "发到飞书群里"),
+                again(ids[1], 1, "用 Kubernetes 部署"),
+                again(ids[2], 1, "x"),
+                again(ids[3], 1, "不变"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(applied, 3);
+    let first = store.segment(ids[0]).unwrap();
+    assert_eq!(
+        (
+            first.text.as_str(),
+            first.model.as_str(),
+            first.source,
+            first.revision
+        ),
+        ("发到飞书群里", "qwen3", Source::Asr, 2)
+    );
+    let same = store.segment(ids[3]).unwrap();
+    assert_eq!((same.model.as_str(), same.revision), ("qwen3", 1));
+    assert_eq!(store.segment(ids[2]).unwrap().text, "第三句话");
+    assert_eq!(store.retranscribed(id).unwrap(), 3);
+    // Search finds the new text.
+    assert_eq!(
+        texts(&store.search("飞书群里", None, 10).unwrap()),
+        ["发到飞书群里"]
+    );
+
+    // A second pass still undoes to the text before the first.
+    store
+        .apply_retranscription(id, "qwen3-b", &[again(ids[0], 2, "发到飞书群")])
+        .unwrap();
+    // The user edits the second segment afterwards: undo leaves it alone.
+    store
+        .edit_segment(ids[1], "用 K8s 部署", Source::User)
+        .unwrap();
+    assert_eq!(store.retranscribed(id).unwrap(), 2);
+    assert_eq!(store.revert_retranscription(id).unwrap(), 2);
+    let reverted = store.segment(ids[0]).unwrap();
+    assert_eq!(
+        (
+            reverted.text.as_str(),
+            reverted.model.as_str(),
+            reverted.source
+        ),
+        ("发到飞鼠群里", "sense-voice", Source::Asr)
+    );
+    assert_eq!(store.segment(ids[1]).unwrap().text, "用 K8s 部署");
+    let same = store.segment(ids[3]).unwrap();
+    assert_eq!((same.model.as_str(), same.revision), ("sense-voice", 1));
+    assert_eq!(store.retranscribed(id).unwrap(), 0);
+    assert_eq!(store.revert_retranscription(id).unwrap(), 0);
+    // The history keeps every text.
+    let history: Vec<String> = store
+        .revisions(ids[0])
+        .unwrap()
+        .into_iter()
+        .map(|revision| revision.text)
+        .collect();
+    assert_eq!(history, ["发到飞鼠群里", "发到飞书群里", "发到飞书群"]);
+}

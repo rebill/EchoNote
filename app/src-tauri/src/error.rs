@@ -66,6 +66,9 @@ impl From<EngineError> for CommandError {
             EngineError::Detector(_) => "vad-missing",
             EngineError::Recording(_) | EngineError::Io(_) => "io",
             EngineError::Stopped => "engine",
+            EngineError::Retranscribing => "retranscribing",
+            EngineError::ModelLoad(_) => "model-load",
+            EngineError::Cancelled => "cancelled",
         };
         Self::new(code, error.to_string())
     }

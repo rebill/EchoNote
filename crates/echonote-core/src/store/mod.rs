@@ -6,6 +6,7 @@
 //! store holds rows only; recording files are the caller's to create and delete.
 
 mod read;
+mod retranscribe;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,7 @@ use rusqlite::{Connection, OpenFlags};
 
 pub use ai::{Correction, NewCorrection, NewSummary, QaTurn, SummaryRow, TemplateRow};
 pub use read::SearchHit;
+pub use retranscribe::Retranscribed;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

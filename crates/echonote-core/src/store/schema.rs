@@ -1,7 +1,7 @@
 //! Schema migrations. Entry `n` takes the database from `user_version` n to n + 1. Never edit
 //! a released entry; append a new one.
 
-pub const MIGRATIONS: &[&str] = &[V1, V2, V3];
+pub const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
 
 /// Meetings, their recorded tracks and transcript segments, segment history, settings, and the
 /// search index. The index is contentless and holds only visible text: segments hidden as
@@ -142,4 +142,18 @@ CREATE TABLE llm_corrections (
     previous_revision INTEGER NOT NULL
 );
 CREATE INDEX llm_corrections_meeting ON llm_corrections (meeting_id);
+"#;
+
+/// Segments transcribed again with the high-accuracy model: the revision and model they had
+/// before the first pass (what "undo" goes back to), and the revision that pass produced (a
+/// later edit makes the row stale, and undo leaves that segment alone).
+const V4: &str = r#"
+CREATE TABLE retranscriptions (
+    segment_id INTEGER PRIMARY KEY REFERENCES segments (id) ON DELETE CASCADE,
+    meeting_id INTEGER NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,
+    previous_revision INTEGER NOT NULL,
+    previous_model TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+CREATE INDEX retranscriptions_meeting ON retranscriptions (meeting_id);
 "#;

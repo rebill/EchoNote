@@ -57,6 +57,8 @@ enum Message {
         reply: Reply,
     },
     Hold(bool),
+    /// Free this model now if nobody holds it (the high-accuracy model after a pass).
+    Unload(String),
 }
 
 /// Handle to the worker thread; the thread exits when every handle and client is gone.
@@ -77,6 +79,11 @@ impl Worker {
                 .expect("spawn the ASR worker");
         }
         Self { tx, loaded }
+    }
+
+    /// Free `model` as soon as no client holds it, instead of after the idle time.
+    pub fn unload(&self, model: &Model) {
+        let _ = self.tx.send(Message::Unload(model.id()));
     }
 
     /// Id of the model in memory, if any.
@@ -184,6 +191,12 @@ fn run(rx: mpsc::Receiver<Message>, idle_unload: Duration, shown: Arc<Mutex<Opti
         match message {
             Message::Hold(true) => holds += 1,
             Message::Hold(false) => holds = holds.saturating_sub(1),
+            Message::Unload(id) => {
+                if holds == 0 && loaded.as_ref().is_some_and(|current| current.id == id) {
+                    loaded = None;
+                    set_shown(None);
+                }
+            }
             Message::Load { model, reply } => {
                 failed = None;
                 ensure(&mut loaded, &mut failed, &model, &reply, true, &set_shown);

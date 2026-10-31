@@ -39,12 +39,13 @@ impl DecoderFactory for SherpaModel {
     fn id(&self) -> String {
         let spec = &self.0;
         format!(
-            "{}:{}:{}:{:?}:{}",
+            "{}:{}:{}:{:?}:{}:{:?}",
             spec.kind.name(),
             spec.dir.display(),
             spec.num_threads,
             spec.language,
-            spec.use_itn
+            spec.use_itn,
+            spec.hotwords
         )
     }
 
@@ -82,6 +83,8 @@ pub struct FakeModel {
     pub load_time: Duration,
     /// Fail to load (tests the load-failure path).
     pub broken: bool,
+    /// Capital letters: a second model that hears the same audio differently.
+    pub upper: bool,
 }
 
 impl Default for FakeModel {
@@ -92,6 +95,7 @@ impl Default for FakeModel {
             cost: 0.0,
             load_time: Duration::ZERO,
             broken: false,
+            upper: false,
         }
     }
 }
@@ -112,6 +116,11 @@ impl Decoder for FakeDecoder {
             .enumerate()
             .filter_map(|(index, block)| {
                 let letter = pitch_letter(block, self.0.threshold)?;
+                let letter = if self.0.upper {
+                    letter.to_ascii_uppercase()
+                } else {
+                    letter
+                };
                 Some(Token {
                     text: format!("\u{2581}{letter}"),
                     start_s: (index * FAKE_TOKEN) as f32 / SAMPLE_RATE as f32,

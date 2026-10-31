@@ -10,7 +10,7 @@ use super::*;
 use crate::capture::{FakeSource, Pace, SourceFormat};
 use crate::pipeline::EnergyDetector;
 use crate::recording::{Writer, probe};
-use crate::store::{Crosstalk, MeetingStatus, NewSegment, NewTrack, Store};
+use crate::store::{Crosstalk, MeetingStatus, NewSegment, NewTrack, Source, Store};
 use crate::test_util::TempDir;
 
 const SR: u32 = 16_000;
@@ -650,4 +650,210 @@ fn deleting_removes_rows_and_files_but_not_a_live_or_unrecovered_meeting() {
         engine.delete_meeting(crashed),
         Err(EngineError::Store(StoreError::NoMeeting(_)))
     ));
+}
+
+/// A finished meeting: mic tones at 220 Hz (`c`) and one system tone at 440 Hz (`d`).
+fn recorded(engine: &Engine, events: &Receiver<EngineEvent>) -> i64 {
+    let mic = tones(
+        SR,
+        1,
+        8.0,
+        &[
+            (1.0, 2.0, 220.0, 0.3),
+            (3.0, 3.6, 220.0, 0.3),
+            (6.0, 6.8, 220.0, 0.3),
+        ],
+    );
+    let sys = tones(SR, 1, 8.0, &[(4.5, 5.2, 440.0, 0.3)]);
+    let meeting = engine
+        .start(options(
+            Some(once(mono(), mic, Pace::Fast)),
+            Some(once(mono(), sys, Pace::Fast)),
+        ))
+        .unwrap();
+    until_finished(events, Duration::from_secs(30));
+    engine.stop().unwrap();
+    meeting
+}
+
+fn accurate(name: &str, cost: f64) -> Model {
+    Arc::new(FakeModel {
+        name: name.into(),
+        upper: true,
+        cost,
+        ..FakeModel::default()
+    })
+}
+
+fn by_model(engine: &Engine, meeting: i64, model: &str) -> usize {
+    segments(&engine.store().reader().unwrap(), meeting)
+        .iter()
+        .filter(|segment| segment.model == model)
+        .count()
+}
+
+#[test]
+fn a_meeting_is_transcribed_again_within_its_segments_and_undone() {
+    let dir = TempDir::new();
+    let config = EngineConfig {
+        // Only an explicit unload frees the model this soon.
+        idle_unload: Duration::from_secs(60),
+        ..config(&dir, FakeModel::default())
+    };
+    let (engine, events) = Engine::open(config).unwrap();
+    let meeting = recorded(&engine, &events);
+    let before = segments(&engine.store().reader().unwrap(), meeting);
+    assert_eq!(before.len(), 4, "{before:#?}");
+    // The user corrected one line: it stays as written.
+    let edited = before[1].id;
+    engine
+        .store()
+        .call(move |store| store.edit_segment(edited, "mine", Source::User))
+        .unwrap();
+    let model = accurate("accurate", 0.0);
+    let mut seen = Vec::new();
+    let done = engine
+        .retranscribe(meeting, &model, &|| false, &mut |progress| {
+            seen.push(progress)
+        })
+        .unwrap();
+    assert_eq!(
+        done,
+        Retranscription {
+            done: 3,
+            total: 3,
+            changed: 3
+        }
+    );
+    assert_eq!(
+        seen.first(),
+        Some(&Retranscription {
+            done: 0,
+            total: 3,
+            changed: 0
+        })
+    );
+    assert!(seen.windows(2).all(|pair| pair[0].done <= pair[1].done));
+    let after = segments(&engine.store().reader().unwrap(), meeting);
+    for (old, new) in before.iter().zip(&after) {
+        assert_eq!(
+            (old.id, old.track, old.start_ms, old.end_ms),
+            (new.id, new.track, new.start_ms, new.end_ms)
+        );
+        if old.id == edited {
+            assert_eq!((new.text.as_str(), new.model.as_str()), ("mine", "fake"));
+            continue;
+        }
+        let letter = if new.track == TrackKind::Mic {
+            'C'
+        } else {
+            'D'
+        };
+        assert!(
+            new.text.contains(letter) && !new.text.chars().any(|c| c.is_lowercase()),
+            "{new:?}"
+        );
+        assert_eq!(new.model, "accurate");
+    }
+    // Nothing is left for a second pass, and the model does not stay in memory.
+    let again = engine
+        .retranscribe(meeting, &model, &|| false, &mut |_| {})
+        .unwrap();
+    assert_eq!(again.total, 0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while engine.worker().loaded().is_some() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(engine.worker().loaded(), None);
+
+    let undone = engine
+        .store()
+        .call(move |store| store.revert_retranscription(meeting))
+        .unwrap();
+    assert_eq!(undone, 3);
+    let reverted = segments(&engine.store().reader().unwrap(), meeting);
+    for (old, new) in before
+        .iter()
+        .zip(&reverted)
+        .filter(|(old, _)| old.id != edited)
+    {
+        assert_eq!(
+            (new.text.as_str(), new.model.as_str()),
+            (old.text.as_str(), "fake")
+        );
+    }
+}
+
+#[test]
+fn a_pass_stops_when_asked_or_for_a_recording_and_continues_later() {
+    let dir = TempDir::new();
+    let (engine, events) = Engine::open(config(&dir, FakeModel::default())).unwrap();
+    let meeting = recorded(&engine, &events);
+    let model = accurate("accurate", 0.0);
+    // Stopped after the first result, which is kept.
+    let stop = AtomicBool::new(false);
+    let result = engine.retranscribe(
+        meeting,
+        &model,
+        &|| stop.load(Ordering::Relaxed),
+        &mut |progress| {
+            if progress.done > 0 {
+                stop.store(true, Ordering::Relaxed);
+            }
+        },
+    );
+    assert!(matches!(result, Err(EngineError::Cancelled)), "{result:?}");
+    assert_eq!(by_model(&engine, meeting, "accurate"), 1);
+    let rest = engine
+        .retranscribe(meeting, &model, &|| false, &mut |_| {})
+        .unwrap();
+    assert_eq!((rest.done, rest.total), (3, 3));
+    assert_eq!(by_model(&engine, meeting, "accurate"), 4);
+
+    // A recording that starts stops the pass.
+    let slow = accurate("slow", 0.5);
+    let progressed = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let pass = scope.spawn(|| {
+            engine.retranscribe(meeting, &slow, &|| false, &mut |progress| {
+                if progress.done > 0 {
+                    progressed.store(true, Ordering::Release);
+                }
+            })
+        });
+        while !progressed.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let silence = tones(SR, 1, 30.0, &[]);
+        engine
+            .start(options(Some(once(mono(), silence, Pace::Real)), None))
+            .unwrap();
+        let result = pass.join().unwrap();
+        assert!(matches!(result, Err(EngineError::Busy)), "{result:?}");
+    });
+    let kept = by_model(&engine, meeting, "slow");
+    assert!((1..4).contains(&kept), "{kept}");
+    // And none starts while recording.
+    let result = engine.retranscribe(meeting, &slow, &|| false, &mut |_| {});
+    assert!(matches!(result, Err(EngineError::Busy)), "{result:?}");
+    engine.stop().unwrap();
+    until_finished(&events, Duration::from_secs(10));
+}
+
+#[test]
+fn a_model_that_fails_to_load_changes_nothing() {
+    let dir = TempDir::new();
+    let (engine, events) = Engine::open(config(&dir, FakeModel::default())).unwrap();
+    let meeting = recorded(&engine, &events);
+    let broken: Model = Arc::new(FakeModel {
+        name: "broken".into(),
+        broken: true,
+        ..FakeModel::default()
+    });
+    let result = engine.retranscribe(meeting, &broken, &|| false, &mut |_| {});
+    assert!(
+        matches!(result, Err(EngineError::ModelLoad(_))),
+        "{result:?}"
+    );
+    assert_eq!(by_model(&engine, meeting, "fake"), 4);
 }

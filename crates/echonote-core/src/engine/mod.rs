@@ -14,6 +14,7 @@
 
 mod decoder;
 mod recovery;
+mod retranscribe;
 mod session;
 mod store_thread;
 #[cfg(test)]
@@ -28,6 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use decoder::{Decoder, DecoderFactory, FAKE_TOKEN, FakeModel, Model, SherpaModel};
+pub use retranscribe::Retranscription;
 pub use store_thread::StoreHandle;
 pub use worker::{Client, Spill, Worker, WorkerEvent};
 
@@ -280,6 +282,12 @@ pub enum EngineError {
     Detector(String),
     #[error("the recording thread stopped unexpectedly")]
     Stopped,
+    #[error("another meeting is being transcribed again")]
+    Retranscribing,
+    #[error("the model could not be loaded: {0}")]
+    ModelLoad(String),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub struct Engine {
@@ -289,6 +297,9 @@ pub struct Engine {
     events: Sender<EngineEvent>,
     active: Mutex<Option<session::Handle>>,
     recovering: AtomicBool,
+    /// A meeting is being transcribed again; `interrupt` stops it for a recording.
+    retranscribing: AtomicBool,
+    interrupt: AtomicBool,
     /// Recovery finished at least once: a meeting still marked `recording` that is not the
     /// live one could not be recovered and may be deleted.
     recovered: AtomicBool,
@@ -345,6 +356,8 @@ impl Engine {
                 events,
                 active: Mutex::new(None),
                 recovering: AtomicBool::new(false),
+                retranscribing: AtomicBool::new(false),
+                interrupt: AtomicBool::new(false),
                 recovered: AtomicBool::new(false),
             },
             received,
@@ -378,6 +391,8 @@ impl Engine {
             }
             handle.join();
         }
+        // Recording comes first: a pass of the high-accuracy model stops.
+        self.interrupt.store(true, Ordering::Release);
         let handle = session::spawn(
             self.config.clone(),
             self.store.clone(),
@@ -429,6 +444,47 @@ impl Engine {
                 Ok(())
             }
             _ => Err(EngineError::NoSession),
+        }
+    }
+
+    /// Transcribe `meeting` again with `model` (see `retranscribe`). Blocks until done; run
+    /// it on a thread of its own. Refused while recording or recovering; starting a
+    /// recording stops it with `Busy`, and `stop` with `Cancelled`. What was decoded before
+    /// it stopped is kept, and the next pass continues from there.
+    pub fn retranscribe(
+        &self,
+        meeting: i64,
+        model: &Model,
+        stop: &dyn Fn() -> bool,
+        on_progress: &mut dyn FnMut(Retranscription),
+    ) -> Result<Retranscription, EngineError> {
+        {
+            let active = self.active.lock().map_err(|_| EngineError::Stopped)?;
+            if active.as_ref().is_some_and(|handle| !handle.finished()) {
+                return Err(EngineError::Busy);
+            }
+            if self.recovering.load(Ordering::Acquire) {
+                return Err(EngineError::Recovering);
+            }
+            if self.retranscribing.swap(true, Ordering::AcqRel) {
+                return Err(EngineError::Retranscribing);
+            }
+            self.interrupt.store(false, Ordering::Release);
+        }
+        let interrupted = || self.interrupt.load(Ordering::Acquire);
+        let result = retranscribe::run(
+            &self.config,
+            &self.store,
+            &self.worker,
+            meeting,
+            model,
+            &|| stop() || interrupted(),
+            on_progress,
+        );
+        self.retranscribing.store(false, Ordering::Release);
+        match result {
+            Err(EngineError::Cancelled) if interrupted() => Err(EngineError::Busy),
+            other => other,
         }
     }
 

@@ -98,6 +98,9 @@ fn is_word(ch: char) -> bool {
 
 /// Most search spellings tried for one query.
 const MAX_VARIANTS: usize = 32;
+/// Qwen3-ASR warns past about 48 prompt tokens of hotwords.
+const MAX_HOTWORDS: usize = 20;
+const MAX_HOTWORD_CHARS: usize = 120;
 
 impl Glossary {
     pub fn new(entries: &[Entry]) -> Self {
@@ -140,6 +143,30 @@ impl Glossary {
     /// Terms in the order they were added: hotwords and LLM context.
     pub fn terms(&self) -> &[String] {
         &self.terms
+    }
+
+    /// Hotwords for the high-accuracy model: the first terms, comma-separated, short enough
+    /// to leave the model's prompt room for 12 s of audio. `None` without terms.
+    pub fn hotwords(&self) -> Option<String> {
+        let mut out = String::new();
+        for term in self.terms.iter().take(MAX_HOTWORDS) {
+            let term: String = term
+                .chars()
+                .filter(|c| *c != ',' && !c.is_control())
+                .collect();
+            let term = term.trim();
+            if term.is_empty() {
+                continue;
+            }
+            if out.chars().count() + term.chars().count() + 1 > MAX_HOTWORD_CHARS {
+                break;
+            }
+            if !out.is_empty() {
+                out.push(',');
+            }
+            out.push_str(term);
+        }
+        (!out.is_empty()).then_some(out)
     }
 
     /// `text` with every alias replaced by its term.
@@ -322,5 +349,28 @@ mod tests {
         assert_eq!(glossary.search_variants("预算"), vec!["预算".to_owned()]);
         let short = glossary.search_variants("飞书");
         assert!(short.contains(&"飞鼠".to_owned()) && short.contains(&"非书".to_owned()));
+    }
+
+    #[test]
+    fn hotwords_are_the_first_terms_without_commas() {
+        assert_eq!(Glossary::default().hotwords(), None);
+        let entries = [
+            entry(1, "飞书", &["飞鼠"]),
+            entry(2, "Kubernetes, K8s", &[]),
+            entry(3, "Q3", &[]),
+        ];
+        assert_eq!(
+            Glossary::new(&entries).hotwords().as_deref(),
+            Some("飞书,Kubernetes K8s,Q3")
+        );
+        let many: Vec<Entry> = (0..40)
+            .map(|i| entry(i, &format!("术语{i}"), &[]))
+            .collect();
+        let hotwords = Glossary::new(&many).hotwords().unwrap();
+        assert_eq!(hotwords.split(',').count(), MAX_HOTWORDS);
+        let long: Vec<Entry> = (0..20)
+            .map(|i| entry(i, &format!("{i}{}", "长".repeat(30)), &[]))
+            .collect();
+        assert!(Glossary::new(&long).hotwords().unwrap().chars().count() <= MAX_HOTWORD_CHARS);
     }
 }
