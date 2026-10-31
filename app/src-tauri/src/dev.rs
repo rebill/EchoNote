@@ -7,8 +7,10 @@
 //! - `ECHONOTE_SMOKE`: a file path; the UI records the fake input, checks what it rendered and
 //!   writes a JSON report there, then the app quits (`scripts/dev/app_smoke.sh`).
 //! - `ECHONOTE_EXPORT_DIR`: exports are written here without the save dialog.
+//! - `ECHONOTE_HIGHLIGHTS_SECONDS`: live highlights interval instead of three minutes.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Default)]
 pub struct Dev {
@@ -16,6 +18,7 @@ pub struct Dev {
     pub fake_input: Option<PathBuf>,
     pub smoke: Option<PathBuf>,
     pub export_dir: Option<PathBuf>,
+    pub highlights_interval: Option<Duration>,
 }
 
 impl Dev {
@@ -29,6 +32,10 @@ impl Dev {
             fake_input: path("ECHONOTE_FAKE_INPUT"),
             smoke: path("ECHONOTE_SMOKE"),
             export_dir: path("ECHONOTE_EXPORT_DIR"),
+            highlights_interval: std::env::var("ECHONOTE_HIGHLIGHTS_SECONDS")
+                .ok()
+                .and_then(|seconds| seconds.parse().ok())
+                .map(Duration::from_secs),
         }
     }
 }

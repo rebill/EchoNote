@@ -2,7 +2,7 @@
 //! and short strings, never paths.
 
 use echonote_core::capture::{Permission, input_devices, mic_permission, sys_permission};
-use echonote_core::store::{Meeting, Track};
+use echonote_core::store::{Meeting, SummaryKind, Track};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -10,7 +10,7 @@ use crate::error::{CommandError, CommandResult};
 use crate::state::{AppState, lock};
 use crate::views::{SegmentView, Snapshot};
 
-const MAX_TITLE: usize = 200;
+pub(crate) const MAX_TITLE: usize = 200;
 const MAX_QUERY: usize = 200;
 const SEARCH_LIMIT: usize = 200;
 
@@ -156,6 +156,18 @@ pub struct MeetingDetail {
     segments: Vec<SegmentView>,
     /// Size of the recordings on disk.
     audio_bytes: u64,
+    notes: Option<crate::ai::jobs::SummaryView>,
+    highlights: Option<crate::ai::jobs::SummaryView>,
+    qa: Vec<crate::ai::jobs::QaView>,
+    /// LLM changes waiting for review, with the text before them (as shown).
+    corrections: Vec<CorrectionView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionView {
+    segment_id: i64,
+    previous_text: String,
 }
 
 #[tauri::command]
@@ -165,6 +177,21 @@ pub async fn get_meeting(state: State<'_, AppState>, id: i64) -> CommandResult<M
     state.read(|store| {
         Ok(MeetingDetail {
             audio_bytes,
+            notes: store
+                .latest_summary(id, SummaryKind::Notes)?
+                .map(Into::into),
+            highlights: store
+                .latest_summary(id, SummaryKind::Highlights)?
+                .map(Into::into),
+            qa: store.qa(id)?.into_iter().map(Into::into).collect(),
+            corrections: store
+                .corrections(id)?
+                .into_iter()
+                .map(|correction| CorrectionView {
+                    segment_id: correction.segment_id,
+                    previous_text: glossary.apply(&correction.previous_text).into_owned(),
+                })
+                .collect(),
             meeting: store.meeting(id)?.into(),
             tracks: store.tracks(id)?.into_iter().map(TrackView::from).collect(),
             segments: store

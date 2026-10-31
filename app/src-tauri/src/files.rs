@@ -132,6 +132,7 @@ pub async fn export_meeting(
 pub async fn delete_meeting(app: AppHandle, id: i64) -> CommandResult<()> {
     let handle = app.clone();
     blocking(app, move |state| {
+        state.jobs.cancel_meeting(id);
         state.engine()?.delete_meeting(id)?;
         log!("deleted a meeting");
         let _ = handle.emit("library-changed", ());

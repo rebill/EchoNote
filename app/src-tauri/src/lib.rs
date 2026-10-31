@@ -1,5 +1,6 @@
 //! EchoNote desktop app: window, tray, global shortcut and IPC around `echonote-core`.
 
+mod ai;
 mod commands;
 mod dev;
 mod edit;
@@ -10,6 +11,7 @@ mod log;
 mod models;
 mod playback;
 mod recording;
+mod secrets;
 mod settings;
 mod shortcut;
 mod state;
@@ -23,6 +25,7 @@ use std::sync::atomic::Ordering;
 use echonote_core::engine::{Engine, SessionState};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 
+use crate::ai::config::AiSettings;
 use crate::error::CommandError;
 use crate::log::log;
 use crate::settings::Settings;
@@ -67,6 +70,24 @@ pub fn run() {
             files::export_meeting,
             files::delete_meeting,
             files::storage_usage,
+            ai::get_ai,
+            ai::save_provider,
+            ai::delete_provider,
+            ai::set_ai_options,
+            ai::consent_provider,
+            ai::test_provider,
+            ai::list_models,
+            ai::save_template,
+            ai::delete_template,
+            ai::jobs::summarize,
+            ai::jobs::ask,
+            ai::jobs::correct_meeting,
+            ai::jobs::keep_corrections,
+            ai::jobs::revert_correction,
+            ai::jobs::clear_qa,
+            ai::jobs::cancel_job,
+            ai::jobs::running_jobs,
+            ai::live::get_highlights,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build EchoNote")
@@ -89,21 +110,20 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
         models.vad.is_some()
     );
     let config = models::engine_config(data_dir.clone(), &models);
-    let (engine, events, settings) = match Engine::open(config) {
+    let (engine, events, settings, ai) = match Engine::open(config) {
         Ok((engine, events)) => {
-            let settings = engine
-                .store()
-                .reader()
-                .map(|store| Settings::load(&store))
-                .unwrap_or_default();
-            (Ok(Arc::new(engine)), Some(events), settings)
+            let reader = engine.store().reader();
+            let settings = reader.as_ref().map(Settings::load).unwrap_or_default();
+            let ai = reader.as_ref().map(AiSettings::load).unwrap_or_default();
+            (Ok(Arc::new(engine)), Some(events), settings, ai)
         }
         Err(error) => {
             log!("engine: {error}");
-            (Err(CommandError::from(error)), None, Settings::default())
+            let error = CommandError::from(error);
+            (Err(error), None, Settings::default(), AiSettings::default())
         }
     };
-    let state = AppState::new(engine, data_dir, models, settings.clone(), dev);
+    let state = AppState::new(engine, data_dir, models, settings.clone(), ai, dev);
     if state.engine.is_ok()
         && let Err(error) = state.reload_glossary()
     {
@@ -137,6 +157,7 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
                 Err(error) => log!("recovery: {error}"),
             })?;
     }
+    ai::live::spawn(handle.clone())?;
     window::show_main(&handle);
     Ok(())
 }

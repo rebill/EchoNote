@@ -13,7 +13,7 @@ use crate::views::SegmentView;
 /// The ASR side caps segments at this length too (`echonote_core::text`).
 const MAX_SEGMENT_CHARS: usize = 3000;
 
-fn shown(state: &AppState, segment: i64) -> CommandResult<SegmentView> {
+pub(crate) fn shown(state: &AppState, segment: i64) -> CommandResult<SegmentView> {
     let glossary = state.glossary();
     let segment = state.read(|store| store.segment(segment))?;
     Ok(SegmentView::from(&segment).glossed(&glossary))

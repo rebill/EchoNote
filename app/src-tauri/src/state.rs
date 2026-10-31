@@ -8,10 +8,13 @@ use echonote_core::engine::Engine;
 use echonote_core::glossary::{Entry, Glossary};
 use echonote_core::store::{Store, StoreError};
 
+use crate::ai::config::AiSettings;
+use crate::ai::jobs::Jobs;
 use crate::dev::Dev;
 use crate::error::{CommandError, CommandResult};
 use crate::live::Forwarder;
 use crate::models::Located;
+use crate::secrets::Secrets;
 use crate::settings::Settings;
 
 pub struct AppState {
@@ -29,6 +32,10 @@ pub struct AppState {
     pub pending_error: Mutex<Option<CommandError>>,
     /// Why the global shortcut could not be registered.
     pub shortcut_error: Mutex<Option<String>>,
+    /// LLM providers and AI options.
+    ai: Mutex<AiSettings>,
+    pub secrets: Secrets,
+    pub jobs: Jobs,
     /// Replacement rules for displayed and exported text; reloaded when edited.
     glossary: Mutex<Arc<Glossary>>,
     reader: Mutex<Option<Store>>,
@@ -44,9 +51,19 @@ impl AppState {
         data_dir: PathBuf,
         models: Located,
         settings: Settings,
+        ai: AiSettings,
         dev: Dev,
     ) -> Self {
+        // A smoke run must not open a keychain prompt or leave entries behind.
+        let secrets = if dev.smoke.is_some() {
+            Secrets::memory()
+        } else {
+            Secrets::Keychain
+        };
         Self {
+            ai: Mutex::new(ai),
+            secrets,
+            jobs: Jobs::default(),
             engine,
             data_dir,
             models,
@@ -67,6 +84,28 @@ impl AppState {
 
     pub fn settings(&self) -> Settings {
         lock(&self.settings).clone()
+    }
+
+    pub fn ai(&self) -> AiSettings {
+        lock(&self.ai).clone()
+    }
+
+    /// Change the AI settings and save them; nothing changes when `change` or the save fails.
+    pub fn update_ai<T>(
+        &self,
+        change: impl FnOnce(&mut AiSettings) -> CommandResult<T>,
+    ) -> CommandResult<T> {
+        let mut current = lock(&self.ai);
+        let mut next = current.clone();
+        let value = change(&mut next)?;
+        if next != *current {
+            let json = next.to_json();
+            self.engine()?
+                .store()
+                .call(move |store| store.set_setting(crate::ai::config::KEY, &json))?;
+            *current = next;
+        }
+        Ok(value)
     }
 
     pub fn glossary(&self) -> Arc<Glossary> {

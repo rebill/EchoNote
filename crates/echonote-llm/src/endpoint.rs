@@ -63,6 +63,11 @@ impl Endpoint {
         Ok(url)
     }
 
+    /// `scheme://host[:port]`, naming who receives the transcript (the consent prompt).
+    pub fn origin(&self) -> Result<String, LlmError> {
+        Ok(self.url("")?.origin().ascii_serialization())
+    }
+
     /// The server runs on this computer (Ollama, LM Studio): no proxy, nothing leaves it.
     pub fn is_local(&self) -> bool {
         Url::parse(self.base_url.trim()).is_ok_and(|url| is_loopback(&url))
@@ -112,6 +117,16 @@ mod tests {
         assert!(endpoint("http://localhost:11434/v1").url("models").is_ok());
         assert!(endpoint("http://127.0.0.1:1234/v1").is_local());
         assert!(endpoint("http://[::1]:1234/v1").is_local());
+        assert_eq!(
+            endpoint("https://API.example.com:8443/v1?x=1")
+                .origin()
+                .unwrap(),
+            "https://api.example.com:8443"
+        );
+        assert_eq!(
+            endpoint("https://api.deepseek.com").origin().unwrap(),
+            "https://api.deepseek.com"
+        );
         assert!(matches!(
             endpoint("http://192.168.1.5:11434/v1").url("models"),
             Err(LlmError::InsecureUrl)

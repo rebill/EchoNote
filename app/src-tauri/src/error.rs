@@ -71,6 +71,13 @@ impl From<EngineError> for CommandError {
     }
 }
 
+impl From<echonote_llm::LlmError> for CommandError {
+    /// The message can hold the provider's own words; logs take the code only.
+    fn from(error: echonote_llm::LlmError) -> Self {
+        Self::new(error.code(), error.to_string())
+    }
+}
+
 fn store_code(error: &StoreError) -> &'static str {
     match error {
         StoreError::TooNew { .. } => "library-too-new",

@@ -32,6 +32,24 @@
     "allow-delete-glossary-entry",
     "allow-export-meeting",
     "allow-delete-meeting",
-    "allow-storage-usage"
+    "allow-storage-usage",
+    "allow-get-ai",
+    "allow-save-provider",
+    "allow-delete-provider",
+    "allow-set-ai-options",
+    "allow-consent-provider",
+    "allow-test-provider",
+    "allow-list-models",
+    "allow-save-template",
+    "allow-delete-template",
+    "allow-summarize",
+    "allow-ask",
+    "allow-correct-meeting",
+    "allow-keep-corrections",
+    "allow-revert-correction",
+    "allow-clear-qa",
+    "allow-cancel-job",
+    "allow-running-jobs",
+    "allow-get-highlights"
   ]
 }
