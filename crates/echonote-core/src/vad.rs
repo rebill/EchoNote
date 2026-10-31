@@ -28,7 +28,9 @@ pub struct VadSpec {
     /// Trailing silence that closes a speech segment, in seconds.
     pub min_silence_s: f32,
     pub min_speech_s: f32,
-    /// Speech longer than this is cut into several segments, in seconds.
+    /// After this much buffered speech sherpa raises the threshold to 0.9 and ends a segment
+    /// after 0.1 s below it instead of 0.5 s of silence (relaxed mode). Continuous speech can
+    /// still run past it.
     pub max_speech_s: f32,
 }
 
@@ -43,6 +45,13 @@ impl VadSpec {
             min_speech_s: 0.25,
             max_speech_s: 10.0,
         }
+    }
+
+    /// Circular-buffer capacity in seconds. [`crate::pipeline::SherpaDetector`] flushes 1 s
+    /// before it fills, which also ends relaxed mode, so the buffer must reach well past
+    /// `max_speech_s`. It grows on demand, so it never preallocates minutes of audio.
+    pub fn buffer_s(&self) -> f32 {
+        (self.max_speech_s + 5.0).clamp(30.0, 60.0)
     }
 
     /// Samples per VAD inference window.
@@ -100,9 +109,8 @@ impl Vad {
                 }
             }
         }
-        let buffer_s = spec.max_speech_s + 5.0;
-        let detector =
-            VoiceActivityDetector::create(&config, buffer_s).ok_or(VadError::CreateFailed)?;
+        let detector = VoiceActivityDetector::create(&config, spec.buffer_s())
+            .ok_or(VadError::CreateFailed)?;
         Ok(Self {
             detector,
             window_size,
@@ -138,8 +146,19 @@ impl Vad {
         Some(result)
     }
 
-    /// Close any open segment at end of input.
+    /// Close the open segment, at end of input or to bound the buffer. The model state is
+    /// kept, so speech that continues opens a new segment on the next window.
     pub fn flush(&self) {
         self.detector.flush();
+    }
+
+    /// Drop finished segments. Returns where the last one ended, in samples accepted so far.
+    pub fn pop_segment_ends(&self) -> Option<u64> {
+        let mut end = None;
+        while let Some(segment) = self.detector.front() {
+            end = Some((segment.start() + i64::from(segment.n())) as u64);
+            self.detector.pop();
+        }
+        end
     }
 }

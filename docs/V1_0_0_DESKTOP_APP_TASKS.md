@@ -60,11 +60,14 @@ Acceptance targets:
 - [ ] Lock-free SPSC ring buffer per source; audio callback does no allocation and takes no lock.
 - [ ] Timeline: per-track sample clock anchored to a shared monotonic start; zero-fill gaps; drift correction within ±20 ms.
 - [ ] Resample to 16 kHz mono with rubato; downmix multichannel input.
-- [ ] Segmenter owned by EchoNote: VAD reports speech per window only; finals are ranges on one timeline buffer; hard cap with 0.4 s overlap stitched by token timestamps.
-- [ ] Segmenter and scheduler as one state machine in `echonote-core` with an injected clock; `echonote-bench` drives the same code; CI gates use a fixed decode-cost model.
-- [ ] ASR scheduler: single worker, finals before previews, one preview slot shared by both tracks, adaptive preview interval, skip mic previews during suspected bleed.
+- [x] Segmenter owned by EchoNote: VAD reports speech per window only; finals are ranges on one timeline buffer; hard cap with 0.4 s overlap stitched by token timestamps. Sherpa's relaxed mode is kept for pauses inside long utterances.
+- [x] Segmenter and scheduler as one state machine in `echonote-core::pipeline` with an injected clock; `echonote-bench live` drives the same code.
+- [ ] CI gates use a fixed decode-cost model.
+- [x] ASR scheduler: single worker, finals before previews, one preview slot shared by both tracks, adaptive preview interval.
+- [ ] Skip mic previews during suspected bleed (system-audio priority is the stand-in until dedup lands).
+- [ ] Port `live_demo` onto `echonote_core::pipeline`.
 - [ ] ASR backlog spill: past about 60 s, drop in-memory PCM and transcribe the range later from the Ogg file.
-- [ ] Keep token timestamps from `OfflineAsr::decode`.
+- [x] Keep token timestamps from `OfflineAsr::decode` (`decode_transcript`).
 - [ ] AEC3 spike in week 1: ERLE on a clean speaker-only recording; reserve a bounded look-behind stage for mic processing.
 - [ ] Native WASAPI source (windows-rs) with a silent render stream so loopback stays on the device clock; process loopback on Windows 11.
 - [ ] macOS tap: enable only the tap stream (`kAudioDevicePropertyIOProcStreamUsage`), handle tap format changes, timestamp from `AudioTimeStamp`.

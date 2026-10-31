@@ -42,6 +42,12 @@ impl ModelKind {
         }
     }
 
+    /// Whether sherpa-onnx returns per-token start times for this model (checked in M0 for
+    /// SenseVoice and Paraformer; unknown models are treated as without).
+    pub fn has_token_timestamps(self) -> bool {
+        matches!(self, Self::SenseVoice)
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         [
             Self::SenseVoice,
@@ -104,14 +110,48 @@ impl OfflineAsr {
 
     /// Decode one segment of 16 kHz mono samples and return the recognized text.
     pub fn decode(&self, samples: &[f32]) -> String {
+        self.decode_transcript(samples).text
+    }
+
+    /// Decode one segment and keep per-token start times where the model provides them.
+    pub fn decode_transcript(&self, samples: &[f32]) -> Transcript {
         let stream = self.recognizer.create_stream();
         stream.accept_waveform(SAMPLE_RATE as i32, samples);
         self.recognizer.decode(&stream);
-        stream
-            .get_result()
-            .map(|result| result.text.trim().to_owned())
-            .unwrap_or_default()
+        let Some(result) = stream.get_result() else {
+            return Transcript::default();
+        };
+        let tokens = match &result.timestamps {
+            Some(starts) if starts.len() == result.tokens.len() => result
+                .tokens
+                .iter()
+                .zip(starts)
+                .map(|(text, start)| Token {
+                    text: text.clone(),
+                    start_s: *start,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        Transcript {
+            text: result.text.trim().to_owned(),
+            tokens,
+        }
     }
+}
+
+/// One recognized token and its start time in seconds from the start of the segment.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Token {
+    pub text: String,
+    pub start_s: f32,
+}
+
+/// Recognized text plus timed tokens. `tokens` is empty when the model has no timestamps.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Transcript {
+    pub text: String,
+    pub tokens: Vec<Token>,
 }
 
 fn offline_config(spec: &OfflineModelSpec) -> Result<OfflineRecognizerConfig, AsrError> {

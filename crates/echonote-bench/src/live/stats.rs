@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use crate::metrics::{percentile, round3};
@@ -20,7 +22,8 @@ pub struct Stats {
     pub final_latency_s: Vec<f64>,
     pub queue_wait_s: Vec<f64>,
     pub preview_lag_s: Vec<f64>,
-    pub first_preview_s: Vec<f64>,
+    /// Track name and seconds from speech onset to its first non-empty preview.
+    pub first_preview_s: Vec<(&'static str, f64)>,
 }
 
 #[derive(Serialize)]
@@ -63,11 +66,23 @@ pub struct StatsSummary {
     pub final_queue_wait: Distribution,
     pub preview_lag: Distribution,
     pub first_preview_latency: Distribution,
+    /// With a priority track the other track gets no previews while it speaks, so only the
+    /// priority track's distribution is comparable with the preview budget.
+    pub first_preview_latency_by_track: BTreeMap<&'static str, Distribution>,
 }
 
 impl Stats {
     pub fn summary(&self, audio_s: f64) -> StatsSummary {
         let per_audio = |value: f64| round3(value / audio_s * 1000.0) / 1000.0;
+        let mut by_track: BTreeMap<&'static str, Vec<f64>> = BTreeMap::new();
+        for &(track, value) in &self.first_preview_s {
+            by_track.entry(track).or_default().push(value);
+        }
+        let first_preview: Vec<f64> = self
+            .first_preview_s
+            .iter()
+            .map(|&(_, value)| value)
+            .collect();
         StatsSummary {
             final_decodes: self.final_decodes,
             preview_decodes: self.preview_decodes,
@@ -86,7 +101,11 @@ impl Stats {
             final_latency: distribution(&self.final_latency_s),
             final_queue_wait: distribution(&self.queue_wait_s),
             preview_lag: distribution(&self.preview_lag_s),
-            first_preview_latency: distribution(&self.first_preview_s),
+            first_preview_latency: distribution(&first_preview),
+            first_preview_latency_by_track: by_track
+                .iter()
+                .map(|(track, values)| (*track, distribution(values)))
+                .collect(),
         }
     }
 }
