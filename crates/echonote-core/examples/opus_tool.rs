@@ -10,6 +10,14 @@
 //!     Duration, whether the writer finished, and any torn tail (what crash recovery sees).
 //! decode <file.opus> <out.wav> [start_s] [end_s]
 //!     Decode a range of the track timeline to a 16-bit WAV.
+//! timecode <out.opus> <seconds> [out.wav]
+//!     Write a recording-format file (and optionally the same audio as WAV) whose pitch
+//!     encodes the position. Step `k` lasts 0.2 s; in each 5 s cycle `c = k / 25` the first
+//!     five steps play the base-5 digits of `c % 3125` on tones 0..4 and the other steps
+//!     play tone `k % 25`, tone `i` being `TIMECODE_BASE_HZ + TIMECODE_STEP_HZ * i`. Odd
+//!     10-minute blocks are silent, so the bitrate changes along the file as it does in a
+//!     meeting. Used by
+//!     `scripts/dev/webview_seek_probe.sh` to check seeking in long files.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -53,8 +61,72 @@ fn main() -> Result<()> {
             println!("{} samples to {}", samples.len(), output.display());
             Ok(())
         }
-        _ => bail!("usage: opus_tool roundtrip|probe|decode … (see the file header)"),
+        Some("timecode") => {
+            let usage = "usage: opus_tool timecode <out.opus> <seconds> [out.wav]";
+            let output = PathBuf::from(args.next().context(usage)?);
+            let seconds: f64 = args.next().context(usage)?.parse()?;
+            timecode(&output, seconds, args.next().map(PathBuf::from).as_deref())
+        }
+        _ => bail!("usage: opus_tool roundtrip|probe|decode|timecode … (see the file header)"),
     }
+}
+
+const TIMECODE_STEP_S: f64 = 0.2;
+const TIMECODE_BASE_HZ: f64 = 300.0;
+const TIMECODE_STEP_HZ: f64 = 100.0;
+const TIMECODE_STEPS: u64 = 25;
+const TIMECODE_SILENT_BLOCK_S: u64 = 600;
+
+fn timecode(output: &Path, seconds: f64, wav: Option<&Path>) -> Result<()> {
+    let total = (seconds * SAMPLE_RATE as f64) as u64;
+    let step = (TIMECODE_STEP_S * SAMPLE_RATE as f64) as u64;
+    let started = Instant::now();
+    let mut writer = Writer::create(output, WriterConfig::default())?;
+    let mut wav = wav
+        .map(|path| hound::WavWriter::create(path, wav_spec()))
+        .transpose()?;
+    let mut block = vec![0.0f32; SAMPLE_RATE as usize];
+    let mut phase = 0.0f64;
+    let mut at = 0u64;
+    while at < total {
+        let len = (total - at).min(block.len() as u64) as usize;
+        for (offset, sample) in block[..len].iter_mut().enumerate() {
+            let k = (at + offset as u64) / step;
+            let position = k % TIMECODE_STEPS;
+            let tone = if position < 5 {
+                (k / TIMECODE_STEPS % 3_125) / 5u64.pow(4 - position as u32) % 5
+            } else {
+                position
+            };
+            let hz = TIMECODE_BASE_HZ + TIMECODE_STEP_HZ * tone as f64;
+            phase = (phase + hz / SAMPLE_RATE as f64).fract();
+            let silent =
+                (at + offset as u64) / (TIMECODE_SILENT_BLOCK_S * u64::from(SAMPLE_RATE)) % 2 == 1;
+            *sample = if silent {
+                0.0
+            } else {
+                0.5 * (2.0 * std::f64::consts::PI * phase).sin() as f32
+            };
+        }
+        writer.push(&block[..len])?;
+        if let Some(wav) = &mut wav {
+            for sample in &block[..len] {
+                wav.write_sample((sample * i16::MAX as f32) as i16)?;
+            }
+        }
+        at += len as u64;
+    }
+    writer.finish()?;
+    if let Some(wav) = wav {
+        wav.finalize()?;
+    }
+    println!(
+        "{}: {seconds} s, {} bytes, encoded in {:.1} s",
+        output.display(),
+        std::fs::metadata(output)?.len(),
+        started.elapsed().as_secs_f64()
+    );
+    Ok(())
 }
 
 fn read_wav(path: &Path) -> Result<Vec<f32>> {
@@ -76,14 +148,17 @@ fn read_wav(path: &Path) -> Result<Vec<f32>> {
     })
 }
 
-fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
-    let spec = hound::WavSpec {
+fn wav_spec() -> hound::WavSpec {
+    hound::WavSpec {
         channels: 1,
         sample_rate: SAMPLE_RATE,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
-    };
-    let mut wav = hound::WavWriter::create(path, spec)?;
+    }
+}
+
+fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
+    let mut wav = hound::WavWriter::create(path, wav_spec())?;
     for sample in samples {
         wav.write_sample((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
     }

@@ -56,34 +56,36 @@ Acceptance targets:
 - Windows numbers come from a 4-core, 8 GB machine; until then, Windows-dependent gates stay open.
 ## M1 Headless Core Engine
 
-- [ ] Capture abstraction (`AudioSource` trait) with fake, WAV-file, cpal microphone, macOS tap, and WASAPI loopback sources.
-- [ ] Lock-free SPSC ring buffer per source; audio callback does no allocation and takes no lock.
-- [ ] Timeline: per-track sample clock anchored to a shared monotonic start; zero-fill gaps; drift correction within ±20 ms.
-- [ ] Resample to 16 kHz mono with rubato; downmix multichannel input.
+- [x] Capture abstraction (`AudioSource` trait) with fake, WAV-file, cpal microphone, macOS tap, and WASAPI loopback sources (`echonote-core::capture`).
+- [x] Lock-free SPSC ring buffer per source; audio callback does no allocation and takes no lock (rtrb; full buffers dropped whole, the frame counter keeps the timeline right).
+- [x] Timeline: per-track sample clock anchored to a shared monotonic start; zero-fill gaps; drift correction within ±20 ms (steady error = drift × 10 s; tested at ±500 and ±1500 ppm).
+- [x] Resample to 16 kHz mono with rubato; downmix multichannel input.
 - [x] Segmenter owned by EchoNote: VAD reports speech per window only; finals are ranges on one timeline buffer; hard cap with 0.4 s overlap stitched by token timestamps. Sherpa's relaxed mode is kept for pauses inside long utterances.
 - [x] Segmenter and scheduler as one state machine in `echonote-core::pipeline` with an injected clock; `echonote-bench live` drives the same code.
-- [ ] CI gates use a fixed decode-cost model.
+- [x] CI gates use a fixed decode-cost model (0.03 s + 0.1 × audio s, in `gates.json`).
 - [x] ASR scheduler: single worker, finals before previews, one preview slot shared by both tracks, adaptive preview interval.
-- [ ] Skip mic previews during suspected bleed (system-audio priority is the stand-in until dedup lands).
+- [x] Skip mic previews during suspected bleed: a sys preview that judges the mic preview a duplicate mutes the mic utterance until it ends.
 - [x] Port `live_demo` onto `echonote_core::pipeline`.
-- [ ] ASR backlog spill: past about 60 s, drop in-memory PCM and transcribe the range later from the Ogg file.
+- [x] ASR backlog spill: past about 60 s, drop in-memory PCM and transcribe the range later from the Ogg file.
 - [x] Keep token timestamps from `OfflineAsr::decode` (`decode_transcript`).
-- [ ] AEC3 spike in week 1: ERLE on a clean speaker-only recording; reserve a bounded look-behind stage for mic processing.
-- [ ] Native WASAPI source (windows-rs) with a silent render stream so loopback stays on the device clock; process loopback on Windows 11.
-- [ ] macOS tap: enable only the tap stream (`kAudioDevicePropertyIOProcStreamUsage`), handle tap format changes, timestamp from `AudioTimeStamp`.
-- [ ] Overload policy: drop previews first; never drop audio or finals; drain on stop.
+- [ ] AEC3 spike in week 1: ERLE on a clean speaker-only recording; reserve a bounded look-behind stage for mic processing. Blocked: needs a clean speaker-only recording from the user's machine (no speech, other sounds off).
+- [x] Native WASAPI source (windows-rs) with a silent render stream so loopback stays on the device clock; process loopback on Windows 11 (type-checked with clippy for the Windows target; not yet run on Windows).
+- [x] macOS tap: enable only the tap stream (`kAudioDevicePropertyIOProcStreamUsage`), handle tap format changes, timestamp from `AudioTimeStamp`.
+- [x] Overload policy: drop previews first; never drop audio or finals; drain on stop.
 - [x] Port `text_sanitizer` (repeated-run collapse) and its tests from `asr-service` (`echonote-core::text`; matches the Python output on 3,005 generated cases).
 - [x] Mic/sys duplicate suppression: time-aligned token matching, token-level trimming, provisional decision from sys previews (`echonote-core::crosstalk`); sys finals decode first.
-- [ ] Recorded double-talk eval set (real speakers and room) with false-deletion and miss-rate gates; the synthetic `meeting-zh-dual` bleed run is the stand-in.
-- [ ] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered.
+- [ ] Recorded double-talk eval set (real speakers and room) with false-deletion and miss-rate gates; the synthetic `meeting-zh-dual` bleed run and the `meeting-dual` gate fixture are the stand-ins. Blocked: needs recordings with two real speakers in a room.
+- [x] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered (`echonote-core::engine`).
 - [x] SQLite store (WAL, migrations with backup, FTS5 trigram) for meetings, tracks, segments, revisions, settings (`echonote-core::store`).
-- [ ] Store thread: one writer connection owned by the engine, read-only connections for UI queries.
+- [x] Store thread: one writer connection owned by the engine, read-only connections for UI queries.
 - [x] Ogg/Opus writer per track with page-level writes, background fsync every 10 s (`F_FULLFSYNC` on macOS), per-track transcribed-until marker; probe, repair and decode-from-position for recovery (`echonote-core::recording`, vendored libopus in `crates/echonote-opus`).
-- [ ] Crash recovery on startup: repair the files of meetings left in `recording`, transcribe each track from its transcribed-until marker, mark the meeting recovered (with the session state machine).
-- [ ] Long-file seek accuracy on a 3-hour Ogg/Opus file in WKWebView.
-- [ ] Model lifecycle: lazy load on record, buffered audio while loading, unload after 10 minutes idle.
-- [ ] `echonote-bench` regression gates: invariants, decode-work ratio, queue bound, error rate on frozen fixtures.
-- [ ] CI on macOS and Windows runners: fmt, clippy, tests, bench gates; confirm new tests are discovered.
+- [x] Crash recovery on startup: repair the files of meetings left in `recording`, transcribe each track from its transcribed-until marker, mark the meeting recovered (with the session state machine).
+- [x] Long-file seek accuracy on a 3-hour Ogg/Opus file in WKWebView (`scripts/dev/webview_seek_probe.sh`): Ogg/Opus fails (duration 6560 s of 10800 s, seeks off by up to 56 min); WAV is within ±27 ms. Playback serves WAV decoded on the fly (tech design section 12).
+- [x] Model lifecycle: lazy load on record, buffered audio while loading, unload after 10 minutes idle.
+- [x] `echonote-bench` regression gates: invariants, decode-work ratio, queue bound, error rate on frozen fixtures (`echonote-bench gate`; words lost and crosstalk on synthetic fixtures in CI, real-model error rate stays in `echonote-bench eval` because eval audio cannot be redistributed).
+- [x] CI on macOS and Windows runners: fmt, clippy, tests, bench gates (`.github/workflows/desktop.yml`, sherpa archive checked against pinned SHA-256).
+- [ ] First green run of the desktop workflow on GitHub; confirm the test counts match a local run. Needs a push, which waits for the user.
+- [ ] Real-device run of the M1 capture code: macOS tap and microphone in `scripts/dev/live_demo.sh` (TCC prompt), WASAPI process and endpoint loopback on Windows 10 and 11 (needs a Windows machine).
 
 Acceptance targets:
 

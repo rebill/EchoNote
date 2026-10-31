@@ -48,9 +48,24 @@
 
 环形缓冲大小按 10 秒音频分配。ASR 落后时音频在 capture 线程里的时间线缓冲中等待，不丢弃。
 
+M1 实现（`echonote-core::engine`）：`Engine::open` 打开库、启动 ASR 线程和 store 线程；`start` 建会议和两轨录音文件，起一个会话线程，每 20 ms 一拍：读源、时间线、写 Opus、喂管线、派发解码，每 500 ms 提交一批定稿。状态机为 starting → recording ⇄ paused → stopping → finalized，启动时 `recover` 处理遗留的 recording 会议（第 12 节），标为 recovered。麦克风请求了但打不开是错误；系统音频打不开只发通知，录音继续。设备失效后立即重开一次，之后每 2 s 重试。
+
+- ASR 线程只持有一个模型，按引用计数，空闲 10 分钟卸载。按下录音立即开始采集，模型在后台加载，加载期间音频排队；加载失败只发通知，录音和存盘照常。
+- store 线程独占写连接，任务以闭包发送；界面查询用只读连接。
+- 麦克风定稿先放着，等系统音频的进度排除串音（最多 3 s）再放出；系统音频预览判定为串音时，麦克风这一段不再出预览，直到它结束。
+- 排队的定稿音频超过 60 s 时丢掉内存里的 PCM，解码时从 Ogg 文件读回（写入器先 flush 当前页）。串音参考按麦克风的进度减 30 s 修剪，解码落后很多时系统音频的字也不会被提前删掉。
+
 ## 5. 音频采集
 
-所有源实现同一个 `AudioSource` trait：`start(sink)`、`stop()`、`format()`，以及设备变更事件。测试用假源和 WAV 文件源。
+所有源实现同一个 `AudioSource` trait：`format()`、`drain()`（取出样本和时间戳）、`failed()`（设备失效，会话重新打开）、`finished()`、`dropped()`。测试用 `FakeSource`（按实时或尽快速度喂样本，可以在指定时间模拟设备失效）和 WAV 文件源。
+
+M1 实现（`echonote-core::capture`）：
+
+- 每个源一个 rtrb SPSC 环形缓冲，按 10 s 分配。回调写入样本和一个 `Stamp{frame, frames, at_ns}`，`at_ns` 是共用单调时钟上第一帧的采集时刻。缓冲满了整块丢弃，帧计数照常前进，时间线据此补零。回调不分配内存、不加锁。
+- 麦克风（`MicSource`，cpal 0.18）：支持 f32、i16、i32、u16 输入。`at_ns` 按回调时刻减去 cpal 报告的 callback − capture 时间差。没指定设备时每秒查一次默认输入设备，变了就让会话重新打开。
+- macOS 系统音频（`SystemSource`，`native/macos_tap.m`）：先按 Tap 格式打开、分配环形缓冲，再启动。IOProc 用 `kAudioDevicePropertyIOProcStreamUsage` 只启用最后一条（Tap）流；回调传入缓冲年龄 `now->mHostTime − inputTime->mHostTime`，Rust 侧倒推采集时刻。默认输出设备和 Tap 格式的属性监听设置变更标志，会话据此重建。新代码只在本机编译和单元测试过，真机采集要在 app bundle 里弹授权窗，用 `scripts/dev/live_demo.sh` 复测。
+- Windows 系统音频（`capture/system_windows.rs`，windows-rs 0.62）：先试进程回环（`ActivateAudioInterfaceAsync`，排除自身进程树，48 kHz 立体声 i16，`AUTOCONVERTPCM`，事件驱动）；失败时退回默认渲染端点的 loopback，并向同一端点播放静音流，每秒检查默认端点是否变化。时间戳用 QPC（100 ns）。`ECHONOTE_LOOPBACK=endpoint` 强制走端点模式，方便在 Windows 11 上测 Windows 10 路径。目前只通过了 Windows 目标的 clippy，没有在 Windows 上运行过。
+- 录音期间 `KeepAwake` 阻止系统睡眠（macOS `beginActivity`，Windows `SetThreadExecutionState`）。
 
 ### 5.1 麦克风
 
@@ -89,6 +104,8 @@ WebKit 在独立进程里播放音频，按 `getpid()` 排除不到，所以录�
 - 漂移：实测内置设备 < 2 ppm（1 小时 < 8 ms）。用 rubato 可调比例的重采样器缓慢修正，不插入或丢弃样本，两轨偏差保持在 20 ms 以内；USB、蓝牙设备的漂移在 M1 实测。
 - 重采样到 16 kHz 单声道（rubato，多声道先平均）。录音文件和识别都用 16 kHz。
 - 两轨对齐误差：M0 实测麦克风相对系统音频约 +10 ms（扬声器到麦克风的声学和设备延迟）。
+
+M1 实现（`capture/timeline.rs`）：rubato 4 异步 sinc 重采样（128 抽头，BlackmanHarris2，10 ms 输入块），多声道先平均。每块按时间戳算出它在时间线上应在的位置：落后超过 50 ms 补零；偏差超过 10 s 视为时钟跳变，重新锚定；其余用比例控制慢慢调整重采样比例（时间常数 10 s，限幅 ±0.5%），稳态误差等于漂移 × 10 s，测试覆盖 ±500 和 ±1500 ppm，误差都在 20 ms 以内。暂停时不写音频，补 0.6 s 静音结束当前一句，恢复后整条时间线后移暂停的时长。设备失效 0.5 s 后按墙钟补零到当前时刻减 0.2 s，重新打开的设备从正确位置接上。
 
 ## 7. 分段
 
@@ -232,9 +249,16 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 | MP4/Opus | 否 | 能播 | 失败 | 否 |
 | AAC (m4a) | probably | 通过 | 通过 | 是 |
 
-结论：录音用 Ogg/Opus（逐页校验，截断后仍可播放；WebView2 原生支持）。界面不用 `audio.duration`，用库里的时长和段落时间戳。WebKit 报的时长偏差 2.8%，如果跳转误差也按比例增长，3 小时的文件会差几分钟，M1 用 3 小时测试文件验证长文件跳转。macOS 14.2 的 WebKit 较旧，未验证；如果不支持，回退为自定义协议按 Range 现场解码 Opus 输出 WAV，文件格式不变。点击段落跳转的精度（目标 ±100 ms）在 M3 用定时提示音文件验证。
+结论：录音文件用 Ogg/Opus（逐页校验，截断后仍可播放）。
 
-回放通过 Tauri 自定义协议提供文件，支持 Range，作用域限定在 `meetings/` 目录。
+M1 长文件跳转（`scripts/dev/webview_seek_probe.sh`，macOS 15.7.7 系统 WKWebView）：用录音写入器生成 3 小时带时间码的文件（`opus_tool timecode`：每 0.2 s 一个音高，每 5 s 的前 1 s 用 5 个音高编码周期序号；奇数个 10 分钟是静音，码率随位置变化，和会议录音一样），同样的音频另存一份 WAV。每次跳转后经零增益的 Web Audio 图播放 7.5 s（听不到），从音高解出实际播放位置，和 `currentTime` 比较，第二次跳到 5 s 的结果作为输出延迟的基准。
+
+| 文件 | `audio.duration` | 跳转后实际位置减 `currentTime` |
+|---|---|---|
+| Ogg/Opus 3 h（33 MB） | 6560 s（实际 10800 s） | 590 s 处 −19 s；1234–5124 s 处 +462 s 到 +3361 s；6560 s 以后的 4 个目标被截到 6560 s，没有声音 |
+| WAV 3 h（345 MB） | 10800 s | 10 个目标全部在 ±27 ms 以内 |
+
+WebKit 不给 Ogg 建索引，按平均码率把时间换算成字节位置，VBR 加上长时间静音就会错得很远，20 分钟的文件已经差 19–24 s。所以回放改为：Tauri 自定义协议从 Ogg/Opus 现场解码，输出 16 kHz 16 位单声道 WAV（两轨混成一路），把 Range 请求换算成样本位置，用 `Reader::open_at` 只解码请求的区间。WAV 每秒 32 KB，`<audio>` 的时长和跳转都按字节精确换算。录音文件格式不变；WebView2 走同一条路径，两个平台行为一致。协议只接收会议 id，作用域限定在 `meetings/` 目录。点击段落跳转的精度（目标 ±100 ms）在 M3 的应用里复测，macOS 14.2 的 WebKit 仍未验证。
 
 ## 13. 其他模块
 
@@ -261,6 +285,8 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 - 前端：vitest 测组件；Playwright 跑 Vite 开发服务器，IPC 用 mock。macOS 没有 WKWebView driver，不做 tauri-driver 端到端测试。
 - GitHub Actions 跑 macos-14 和 windows-latest，缓存 sherpa 归档，执行 fmt、clippy、test 和 bench 冒烟。评测音频不能提交和再分发，CI 只用可以公开的夹具。新增测试要确认被发现并执行。
 
+M1 实现：`echonote-bench gate` 有 3 个合成夹具（3 分钟双方轮流说话，麦克风带低 10 dB、晚 50 ms 的外放串音，每三轮一次抢话；90 s 连续语音；20 分钟每分钟一句）。语音用音调代替，模型用 `FakeModel`（按音调的八度出字，串音和原声出同样的字），VAD 用能量检测，解码耗时按固定模型（0.03 s + 0.1 × 音频秒）计算，所以队列和延迟数字在任何机器上都一样。门禁项：不变量、`decoded_audio_per_audio_s`、`decodes_per_audio_min`、最大定稿队列、强制切分次数、定稿 p95、停止后排空时间、系统轨首个预览 p95、内存里最多持有的音频、丢失的字、最长定稿、误删用户段、串音隐藏比例。阈值在 `crates/echonote-bench/gates.json`，`--write-baseline` 按当前值加 10% 余量重写。本机两次运行输出逐字节相同；把解码耗时调到 4 倍，8 项延迟门禁失败。真实模型的错误率不进 CI（评测音频不能再分发），用 `echonote-bench eval` 在本机跑。工作流在 `.github/workflows/desktop.yml`；sherpa-onnx-sys 自己下载归档时不校验，工作流先用 `scripts/dev/fetch_sherpa_onnx.py` 按发布页的 sha256 下载并校验，再通过 `SHERPA_ONNX_ARCHIVE_DIR` 交给构建。
+
 **打包**：
 
 - macOS 每个架构出一个 DMG（不做 universal，避免二进制翻倍）。用 ad-hoc 签名，首次打开需要右键打开或执行 `xattr -dr com.apple.quarantine`。
@@ -274,7 +300,7 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 | D 静态链接 | macOS arm64、x64 通过，只依赖系统库；x64 在 Rosetta 下输出与 arm64 一致；Windows 目标通过类型检查（在 macOS 上：`LIBSQLITE3_SYS_USE_PKG_CONFIG=1 DOCS_RS=1 cargo check --target x86_64-pc-windows-msvc`，前者让 SQLite 不在没有 MSVC 头文件的机器上编译 C 代码） | Windows 实际链接（MT 静态库 + `+crt-static`）和二进制大小 |
 | B 系统音频 | macOS 15.7.7 通过，见 5.2 | Windows loopback 实测；macOS 14.2 首次授权流程 |
 | C 串音 | 真机结论见第 10 节；发现分段问题，加硬上限，见第 7 节 | 干净外放录音测 ERLE；AEC3 评估 |
-| E 回放 | macOS 15.7.7 结果见第 12 节 | macOS 14.2、WebView2 |
+| E 回放 | macOS 15.7.7 结果见第 12 节；M1 长文件测试后改为现场解码成 WAV | macOS 14.2、WebView2 |
 | A 模型评测 | 只有在高负载机器上跑的初步数据 | 完整矩阵需要空闲时段重跑（`scripts/dev/run_m0_bench.py`，Windows 用 `windows_m0.ps1 -Step bench`） |
 
 初步数据（M2 MacBook Air，机器上有虚拟机负载，只作参考）：
@@ -317,7 +343,7 @@ Spike E 结果（macOS 15.7.7 系统 WKWebView，`scripts/dev/webview_audio_prob
 | 3 | 按音轨区分"我"和"对方"，v1 不做说话人分离 | 用户确认；减少模型和 CPU 开销 |
 | 4 | 数据存 SQLite，Markdown 只用于导出 | 用户确认；支持搜索、修订和恢复 |
 | 5 | EchoNote 是唯一的分段器，VAD 只判断语音；硬上限 12 s，切点重叠 0.4 s | M0 发现 sherpa 的 max_speech 不能切开连续语音 |
-| 6 | 录音用 Ogg/Opus 16 kHz 24 kbps | 崩溃安全；两个平台的 WebView 都能播放 |
+| 6 | 录音用 Ogg/Opus 16 kHz 24 kbps；回放由自定义协议现场解码成 WAV | 崩溃安全；WKWebView 对长 Ogg 文件的时长和跳转都不准（3 小时文件偏差达 56 分钟），WAV 精确到 ±27 ms |
 | 7 | 默认 VAD 用 Silero，不用 TEN | TEN 附加条款有竞争限制 |
 | 8 | 串音去重以文本相似度为主 | 真机上能量相关不可靠；AEC 待 M1 验证 |
 | 9 | S1 优先，S2 降为备选 | S2 突破内存和安装包预算；S1 是否达标待空闲时段评测 |

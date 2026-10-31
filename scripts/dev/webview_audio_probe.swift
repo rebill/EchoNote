@@ -1,8 +1,8 @@
 // M0 Spike E: which compressed recording formats can the macOS WKWebView (Tauri's webview) play?
 //
 // Loads probe.html from the directory given as the first argument in an offscreen WKWebView,
-// waits for the page to post its JSON result, prints it and exits. Playback is muted.
-// Run through scripts/dev/webview_audio_probe.sh.
+// waits for the page to post its JSON result, prints it and exits. Playback is silent.
+// Run through scripts/dev/webview_audio_probe.sh and scripts/dev/webview_seek_probe.sh.
 
 import AppKit
 import WebKit
@@ -50,7 +50,9 @@ let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let probe = Probe(directory: directory)
-DispatchQueue.main.asyncAfter(deadline: .now() + 150) {
+// Optional second argument: timeout in seconds.
+let timeout = CommandLine.arguments.count > 2 ? Double(CommandLine.arguments[2]) ?? 150 : 150
+DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
     FileHandle.standardError.write("timed out\n".data(using: .utf8)!)
     exit(2)
 }

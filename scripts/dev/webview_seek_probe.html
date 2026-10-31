@@ -1,0 +1,192 @@
+<!doctype html>
+<meta charset="utf-8">
+<script src="config.js"></script>
+<script>
+// Seek accuracy in long recordings. long.opus and long.wav (`opus_tool timecode`) hold the
+// same audio: 0.2 s steps, 25 per 5 s cycle; steps 0..4 of cycle c play the base-5 digits of
+// c on tones 0..4, the other steps play tone k % 25; odd 10-minute blocks are silent. After
+// each seek the page plays 7.5 s through a zero-gain Web Audio graph, finds the tone in every
+// processed buffer, reads the cycle number and reports where the audio really was relative to
+// the element's currentTime. Buffers are timed by their Web Audio playbackTime (callbacks can
+// arrive in bursts), mapped to the element clock by the median of currentTime minus the
+// context time sampled during playback. The first play after loading has extra latency, so
+// the page seeks to 5 s twice and the second one calibrates the output latency.
+const STEP_S = 0.2, BASE_HZ = 300, STEP_HZ = 100, STEPS = 25, CYCLE_S = STEP_S * STEPS;
+const LISTEN_MS = 7500;
+const FILES = ["long.opus", "long.wav"];
+const TARGETS = [5.0, 5.0, 590.0, 1234.5, 2990.3, 3600.4, 5123.7, 6590.6, 7384.1, 8888.8, 10190.3]
+  .filter((t) => t < LENGTH_S - 8);
+
+const log = (text) => window.webkit.messageHandlers.log.postMessage(text);
+const post = (result) => window.webkit.messageHandlers.result.postMessage(JSON.stringify(result, null, 1));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const round = (value, digits) => value == null || !isFinite(value) ? value : Number(value.toFixed(digits));
+const median = (values) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[sorted.length >> 1];
+};
+const wrap = (x, period) => x - period * Math.round(x / period);
+const wait = (target, event, ms) =>
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(`timeout:${event}`), ms);
+    target.addEventListener(event, () => { clearTimeout(timer); resolve("ok"); }, { once: true });
+    target.addEventListener("error", () => {
+      clearTimeout(timer);
+      resolve(`error:${target.error ? target.error.code + " " + target.error.message : "?"}`);
+    }, { once: true });
+  });
+
+// Goertzel power of `hz` in a Hann-windowed buffer.
+function power(data, hz, rate) {
+  const coefficient = 2 * Math.cos((2 * Math.PI * hz) / rate);
+  let s1 = 0, s2 = 0;
+  for (let i = 0; i < data.length; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (data.length - 1));
+    const s = data[i] * w + coefficient * s1 - s2;
+    s2 = s1;
+    s1 = s;
+  }
+  return s1 * s1 + s2 * s2 - coefficient * s1 * s2;
+}
+
+// The tone (0..24) heard in `data`, or -1 when the buffer straddles two steps.
+function heardTone(data, rate) {
+  let best = -1, first = 0, second = 0;
+  for (let j = 0; j < STEPS; j++) {
+    const p = power(data, BASE_HZ + STEP_HZ * j, rate);
+    if (p > first) { second = first; first = p; best = j; } else if (p > second) second = p;
+  }
+  return first > 8 * second ? best : -1;
+}
+
+// Where the audio really was, minus currentTime, from buffers {t, tone}; null if the capture
+// holds no complete digit run.
+function locate(heard) {
+  // Phase within the cycle from the steps that play their own position (tone >= 5).
+  const plain = heard.filter((b) => b.tone >= 5);
+  if (!plain.length) return null;
+  const phase = median(plain.map((b) => wrap((b.tone + 0.5) * STEP_S - b.t, CYCLE_S)));
+  // Digit buffers grouped by the cycle they fall in on the element's clock.
+  const runs = new Map();
+  for (const b of heard.filter((b) => b.tone < 5)) {
+    const local = b.t + phase;
+    const cycle = Math.floor(local / CYCLE_S);
+    const position = Math.floor((local - cycle * CYCLE_S) / STEP_S);
+    if (position > 4) continue;
+    if (!runs.has(cycle)) runs.set(cycle, Array.from({ length: 5 }, () => []));
+    runs.get(cycle)[position].push(b.tone);
+  }
+  for (const [cycle, positions] of runs) {
+    if (positions.some((votes) => votes.length === 0)) continue;
+    const digits = positions.map((votes) => median(votes));
+    const decoded = digits.reduce((value, digit) => value * 5 + digit, 0);
+    // The run started at decoded * CYCLE_S in the file and at cycle * CYCLE_S - phase on the
+    // element's clock.
+    const coarse = (decoded - cycle) * CYCLE_S + phase;
+    // Refine with every tone >= 5 buffer, unwrapped around the coarse value.
+    const fine = plain.map((b) => {
+      const offset = (b.tone + 0.5) * STEP_S - b.t;
+      return coarse + wrap(offset - coarse, CYCLE_S);
+    });
+    return { offsetS: median(fine), cycle: decoded };
+  }
+  return null;
+}
+
+async function probeFile(context, file) {
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.src = file;
+  const opened = performance.now();
+  const loaded = await wait(audio, "loadedmetadata", 30000);
+  const row = { file, loaded, loadMs: round(performance.now() - opened, 0), duration: round(audio.duration, 3), targets: [] };
+  if (loaded !== "ok") return row;
+
+  const source = context.createMediaElementSource(audio);
+  const processor = context.createScriptProcessor(2048, 1, 1);
+  const gain = context.createGain();
+  gain.gain.value = 0;
+  source.connect(processor);
+  processor.connect(gain);
+  gain.connect(context.destination);
+
+  let sink = null;
+  processor.onaudioprocess = (event) => {
+    if (!sink) return;
+    const t = event.playbackTime;
+    const data = event.inputBuffer.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    if (Math.sqrt(sum / data.length) < 0.01) { sink.silent++; return; }
+    const tone = heardTone(data, context.sampleRate);
+    if (tone < 0) { sink.mixed++; return; }
+    sink.heard.push({ t, tone });
+  };
+  // Element time minus context time while playing.
+  const clock = () => {
+    if (sink && !audio.paused) sink.clock.push(audio.currentTime - context.currentTime);
+  };
+  const ticker = setInterval(clock, 20);
+
+  for (const target of TARGETS) {
+    log(`${file} seek ${target}`);
+    const started = performance.now();
+    audio.currentTime = target;
+    const seeked = await wait(audio, "seeked", 15000);
+    const seekMs = performance.now() - started;
+    const landed = audio.currentTime;
+    sink = { silent: 0, mixed: 0, heard: [], clock: [] };
+    let played = "ok";
+    try {
+      await audio.play();
+    } catch (error) {
+      played = `error:${error.name}`;
+    }
+    await sleep(LISTEN_MS);
+    audio.pause();
+    const heard = sink;
+    sink = null;
+    await sleep(200);
+    const mapping = median(heard.clock);
+    // Drop what was still in the graph from before the seek.
+    const timed = mapping == null ? [] : heard.heard
+      .map((b) => ({ t: b.t + mapping, tone: b.tone }))
+      .filter((b) => b.t >= landed + 0.15);
+    const found = locate(timed);
+    row.targets.push({
+      target,
+      seeked,
+      seekMs: round(seekMs, 0),
+      landed: round(landed, 3),
+      played,
+      buffers: { clean: timed.length, silent: heard.silent, mixed: heard.mixed },
+      offsetS: found ? round(found.offsetS, 3) : null,
+    });
+  }
+  clearInterval(ticker);
+  audio.removeAttribute("src");
+  audio.load();
+  const base = row.targets[1]?.offsetS;
+  for (const t of row.targets) {
+    t.errorS = t.offsetS == null || base == null ? null : round(t.offsetS - base, 3);
+  }
+  const errors = row.targets.map((t) => t.errorS).filter((e) => e != null);
+  row.maxAbsErrorS = errors.length ? round(Math.max(...errors.map(Math.abs)), 3) : null;
+  row.undecoded = row.targets.filter((t) => t.offsetS == null).length;
+  return row;
+}
+
+(async () => {
+  const context = new AudioContext();
+  await context.resume();
+  const result = {
+    userAgent: navigator.userAgent,
+    expectedDuration: LENGTH_S,
+    context: { rate: context.sampleRate, state: context.state },
+    files: [],
+  };
+  for (const file of FILES) result.files.push(await probeFile(context, file));
+  post(result);
+})();
+</script>
