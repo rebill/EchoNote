@@ -144,7 +144,7 @@ Acceptance targets:
 ## M5 High-Accuracy Model And Tuning
 
 - [ ] Model manager: manifest with URLs, sizes, SHA-256, mirrors; resumable download; atomic install.
-- [ ] Verify Qwen3-ASR files against the upstream GitHub release digest before publishing the manifest.
+- [x] Verify Qwen3-ASR files against the upstream GitHub release digest before publishing the manifest (`scripts/dev/verify_release_digest.py`: tarball sha256 matches the release; all six files match the manifest by size and SHA-256).
 - [ ] Re-transcribe a saved meeting with the high-accuracy model; keep the previous revision.
 - [ ] Traditional/Simplified output normalization for models that emit Traditional characters.
 - [ ] Tune threads, preview interval, and VAD parameters against the frozen budgets.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Development-only assets for M0 benchmarks. Hashes come from upstream Hugging Face LFS metadata (k2-fsa maintainers) or GitHub release digests where available; ModelScope mirrors were checked against them. qwen3-asr has no Hugging Face upstream: two independent ModelScope mirrors agree, but strict verification against the GitHub tarball digest is deferred to M5.",
+  "notes": "Development-only assets for M0 benchmarks. Hashes come from upstream Hugging Face LFS metadata (k2-fsa maintainers) or GitHub release digests where available; ModelScope mirrors were checked against them. qwen3-asr has no Hugging Face upstream; every file was checked against the k2-fsa GitHub release tarball sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2 (sha256 393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96) with scripts/dev/verify_release_digest.py.",
   "assets": {
     "sense-voice-int8": {
       "description": "SenseVoice-Small int8 2025-09-09 (zh/en/ja/ko/yue)",
