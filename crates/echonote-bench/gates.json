@@ -1,0 +1,125 @@
+{
+  "costModel": {
+    "base_s": 0.03,
+    "per_audio_s": 0.1
+  },
+  "fixtures": {
+    "continuous": {
+      "decoded_audio_per_audio_s": {
+        "max": 5.951
+      },
+      "decodes_per_audio_min": {
+        "max": 57.201
+      },
+      "drain_after_stop_ms": {
+        "max": 0.001
+      },
+      "final_latency_p95_ms": {
+        "max": 3501.301
+      },
+      "forced_splits": {
+        "min": 7.0,
+        "max": 9.0
+      },
+      "invariant_violations": {
+        "max": 0.0
+      },
+      "longest_final_s": {
+        "max": 12.5
+      },
+      "max_final_queue": {
+        "max": 1.101
+      },
+      "max_held_s": {
+        "max": 36.147
+      },
+      "sys_first_preview_p95_ms": {
+        "max": 396.001
+      },
+      "words_lost": {
+        "max": 0.0
+      }
+    },
+    "long-quiet": {
+      "decoded_audio_per_audio_s": {
+        "max": 0.185
+      },
+      "decodes_per_audio_min": {
+        "max": 6.601
+      },
+      "drain_after_stop_ms": {
+        "max": 0.001
+      },
+      "final_latency_p95_ms": {
+        "max": 1034.001
+      },
+      "forced_splits": {
+        "min": 0.0,
+        "max": 0.0
+      },
+      "invariant_violations": {
+        "max": 0.0
+      },
+      "longest_final_s": {
+        "max": 12.5
+      },
+      "max_final_queue": {
+        "max": 1.101
+      },
+      "max_held_s": {
+        "max": 33.045
+      },
+      "own_finals_hidden": {
+        "max": 0.0
+      },
+      "sys_first_preview_p95_ms": {
+        "max": 396.001
+      },
+      "words_lost": {
+        "max": 0.0
+      }
+    },
+    "meeting-dual": {
+      "bleed_hidden_share": {
+        "min": 0.9
+      },
+      "decoded_audio_per_audio_s": {
+        "max": 4.794
+      },
+      "decodes_per_audio_min": {
+        "max": 100.468
+      },
+      "drain_after_stop_ms": {
+        "max": 0.001
+      },
+      "final_latency_p95_ms": {
+        "max": 1867.801
+      },
+      "forced_splits": {
+        "min": 0.0,
+        "max": 0.0
+      },
+      "invariant_violations": {
+        "max": 0.0
+      },
+      "longest_final_s": {
+        "max": 12.5
+      },
+      "max_final_queue": {
+        "max": 2.201
+      },
+      "max_held_s": {
+        "max": 39.183
+      },
+      "own_finals_hidden": {
+        "max": 0.0
+      },
+      "sys_first_preview_p95_ms": {
+        "max": 396.001
+      },
+      "words_lost": {
+        "max": 0.0
+      }
+    }
+  }
+}

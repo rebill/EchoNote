@@ -68,9 +68,10 @@ impl SherpaModel {
     }
 }
 
-/// Deterministic stand-in for an ASR model: one token per 100 ms block whose RMS is above
-/// `threshold`, named after the block's pitch (zero-crossing rate), so a tone and a quieter
-/// copy of it (speaker bleed) produce the same text and other tones produce other text. With
+/// Deterministic stand-in for an ASR model: one token per 100 ms block that holds at least
+/// 25 ms of sound above `threshold`, named after the octave of its pitch (`a` = 55 Hz, so
+/// 220 Hz is `c` and 440 Hz is `d`). A tone and a quieter, delayed copy of it (speaker bleed)
+/// produce the same text whatever the block alignment; other tones produce other text. With
 /// `cost` it also sleeps that long per second of audio, which models decode time for queue
 /// and backlog tests (the fixed decode-cost model of the CI gates).
 #[derive(Clone, Debug)]
@@ -110,9 +111,9 @@ impl Decoder for FakeDecoder {
             .chunks(FAKE_TOKEN)
             .enumerate()
             .filter_map(|(index, block)| {
-                let rms = (block.iter().map(|x| x * x).sum::<f32>() / block.len() as f32).sqrt();
-                (rms >= self.0.threshold).then(|| Token {
-                    text: format!("\u{2581}{}", pitch_letter(block)),
+                let letter = pitch_letter(block, self.0.threshold)?;
+                Some(Token {
+                    text: format!("\u{2581}{letter}"),
                     start_s: (index * FAKE_TOKEN) as f32 / SAMPLE_RATE as f32,
                 })
             })
@@ -127,14 +128,25 @@ impl Decoder for FakeDecoder {
     }
 }
 
-/// `a`.. for each 20 Hz of the block's dominant frequency.
-fn pitch_letter(block: &[f32]) -> char {
-    let crossings = block
+/// The octave letter of the sound in `block`, measured over the part above `threshold` only,
+/// or `None` when that part is shorter than a quarter of the block.
+fn pitch_letter(block: &[f32], threshold: f32) -> Option<char> {
+    let first = block.iter().position(|x| x.abs() >= threshold)?;
+    let last = block.iter().rposition(|x| x.abs() >= threshold)?;
+    let span = &block[first..=last];
+    if span.len() < block.len() / 4 {
+        return None;
+    }
+    let crossings = span
         .windows(2)
         .filter(|pair| (pair[0] >= 0.0) != (pair[1] >= 0.0))
         .count();
-    let hz = crossings as f64 * f64::from(SAMPLE_RATE) / (2.0 * block.len() as f64);
-    (b'a' + ((hz / 20.0).round() as u8).min(25)) as char
+    let hz = crossings as f64 * f64::from(SAMPLE_RATE) / (2.0 * span.len() as f64);
+    if hz < 20.0 {
+        return None;
+    }
+    let octave = (hz / 55.0).log2().round().clamp(0.0, 25.0) as u8;
+    Some((b'a' + octave) as char)
 }
 
 impl DecoderFactory for FakeModel {

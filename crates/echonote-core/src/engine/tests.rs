@@ -1,5 +1,6 @@
 //! Engine behaviour end to end on fake sources and the fake model: tones are "speech", and
-//! the fake model names each 100 ms block after its pitch (220 Hz is `l`, 440 Hz is `w`).
+//! the fake model names each 100 ms block after the octave of its pitch (220 Hz is `c`,
+//! 440 Hz is `d`).
 
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -139,9 +140,9 @@ fn records_two_tracks_and_commits_finals() {
     }
     assert!(
         mic.iter()
-            .all(|s| s.text.contains('l') && !s.text.contains('w'))
+            .all(|s| s.text.contains('c') && !s.text.contains('d'))
     );
-    assert!(sys[0].text.contains('w') && !sys[0].text.contains('l'));
+    assert!(sys[0].text.contains('d') && !sys[0].text.contains('c'));
     // Every committed segment was also announced.
     let announced = seen
         .iter()
@@ -208,7 +209,7 @@ fn speaker_bleed_on_the_mic_is_hidden_and_own_speech_kept() {
     assert!((own[0].start_ms - 8_000).abs() <= 300);
     assert!(notices(&seen).contains(&Notice::Bleed));
     // Hidden duplicates stay out of search.
-    let hits = reader.search("w w w", Some(meeting), 10).unwrap();
+    let hits = reader.search("d d d", Some(meeting), 10).unwrap();
     assert!(
         hits.iter().all(|hit| hit.track == TrackKind::Sys),
         "{hits:#?}"
@@ -247,7 +248,7 @@ fn a_decoder_backlog_spills_to_the_file_and_everything_is_transcribed() {
     assert!(
         found
             .iter()
-            .all(|s| s.text.contains('w') && !s.text.contains('l'))
+            .all(|s| s.text.contains('d') && !s.text.contains('c'))
     );
     let sys_track = &reader.tracks(meeting).unwrap()[0];
     assert!(sys_track.transcribed_until_ms >= 59_000);
@@ -485,7 +486,7 @@ fn recovery_transcribes_the_tail_after_the_marker() {
             track: TrackKind::Mic,
             start_ms: 950,
             end_ms: 1_900,
-            text: "l l l".into(),
+            text: "c c c".into(),
             raw_text: None,
             model: "fake".into(),
             crosstalk: None,

@@ -3,7 +3,7 @@
 //! single-worker clock, so latency and occupancy reflect this machine without waiting in real
 //! time.
 
-mod score;
+pub mod score;
 mod sim;
 mod stats;
 
@@ -20,7 +20,7 @@ use crate::audio::{load_wav, seconds};
 use crate::metrics::round3;
 use crate::model_arg::{ModelArgs, default_streaming_dir, models_dir};
 use crate::sys_metrics::{logical_cpus, rss_now_mb, usage};
-use sim::{Sim, Track};
+pub use sim::{Cost, FinalSegment, Sim, Track};
 
 /// Per side of a forced cut, so the two finals share 0.4 s that token timestamps split.
 const DEFAULT_OVERLAP_S: f64 = 0.2;
@@ -181,6 +181,7 @@ pub fn run(args: LiveArgs) -> Result<()> {
     let mut sim = Sim::new(
         Pipeline::new(config, detectors),
         &asr,
+        Cost::Measured,
         streaming.as_ref(),
         args.preview,
         names.clone(),

@@ -3,6 +3,7 @@
 
 mod audio;
 mod eval;
+mod gate;
 mod live;
 mod metrics;
 mod model_arg;
@@ -26,6 +27,8 @@ enum Command {
     Eval(eval::EvalArgs),
     /// Simulate the live pipeline (VAD, previews, finals) over one or two tracks.
     Live(live::LiveArgs),
+    /// Deterministic regression gates on synthetic fixtures (no models needed).
+    Gate(gate::GateArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,5 +36,6 @@ fn main() -> anyhow::Result<()> {
         Command::Smoke(args) => eval::smoke(args),
         Command::Eval(args) => eval::run(args),
         Command::Live(args) => live::run(args),
+        Command::Gate(args) => gate::run(args),
     }
 }

@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use echonote_core::SAMPLE_RATE;
-use echonote_core::asr::{OfflineAsr, StreamingAsr, Transcript};
+use echonote_core::asr::{StreamingAsr, Transcript};
 use echonote_core::crosstalk::Word;
+use echonote_core::engine::Decoder;
 use echonote_core::pipeline::{Job, JobKind, Output, Pipeline};
 use serde::Serialize;
 use sherpa_onnx::OnlineStream;
@@ -51,13 +52,23 @@ struct InFlight {
     done_s: f64,
 }
 
+/// How long a decode takes on the simulated worker.
+#[derive(Clone, Copy, Debug)]
+pub enum Cost {
+    /// The measured wall time of the real decode.
+    Measured,
+    /// `base_s + per_audio_s * audio seconds`, independent of the machine (CI gates).
+    Fixed { base_s: f64, per_audio_s: f64 },
+}
+
 /// Virtual-time driver of the core [`Pipeline`] with one ASR worker. Every decode runs for real
-/// and its measured duration advances the worker clock; its result is handed back only when
-/// the simulated clock reaches the end of that decode, so audio arriving meanwhile can make a
-/// preview stale exactly as in the app.
+/// and its duration (measured, or from a fixed cost model) advances the worker clock; its
+/// result is handed back only when the simulated clock reaches the end of that decode, so
+/// audio arriving meanwhile can make a preview stale exactly as in the app.
 pub struct Sim<'a> {
     pipeline: Pipeline,
-    asr: &'a OfflineAsr,
+    asr: &'a dyn Decoder,
+    cost: Cost,
     streaming: Option<&'a StreamingAsr>,
     mode: PreviewMode,
     names: Vec<&'static str>,
@@ -67,12 +78,15 @@ pub struct Sim<'a> {
     in_flight: Option<InFlight>,
     pub stats: Stats,
     pub finals: Vec<FinalSegment>,
+    /// Most timeline samples the pipeline held for one track at once.
+    pub max_held: usize,
 }
 
 impl<'a> Sim<'a> {
     pub fn new(
         pipeline: Pipeline,
-        asr: &'a OfflineAsr,
+        asr: &'a dyn Decoder,
+        cost: Cost,
         streaming: Option<&'a StreamingAsr>,
         mode: PreviewMode,
         names: Vec<&'static str>,
@@ -81,6 +95,7 @@ impl<'a> Sim<'a> {
         Self {
             pipeline,
             asr,
+            cost,
             streaming,
             mode,
             views: names.iter().map(|_| TrackView::default()).collect(),
@@ -90,6 +105,7 @@ impl<'a> Sim<'a> {
             in_flight: None,
             stats: Stats::default(),
             finals: Vec::new(),
+            max_held: 0,
         }
     }
 
@@ -103,6 +119,7 @@ impl<'a> Sim<'a> {
             self.pipeline
                 .push(index, &track.samples[tick_end - window..tick_end], now_s);
             self.stats.vad_s += started.elapsed().as_secs_f64();
+            self.max_held = self.max_held.max(self.pipeline.held(index));
             self.observe(index, now_s);
         }
         self.run_worker(now_s);
@@ -180,8 +197,15 @@ impl<'a> Sim<'a> {
             // A final that waited behind a decode starts when that decode ended.
             let start_s = self.worker_free_s.max(job.ready_s);
             let started = Instant::now();
-            let transcript = self.asr.decode_transcript(&job.samples);
-            let decode_s = started.elapsed().as_secs_f64();
+            let transcript = self.asr.decode(&job.samples);
+            let audio_s = job.samples.len() as f64 / SR;
+            let decode_s = match self.cost {
+                Cost::Measured => started.elapsed().as_secs_f64(),
+                Cost::Fixed {
+                    base_s,
+                    per_audio_s,
+                } => base_s + per_audio_s * audio_s,
+            };
             self.stats.decoded_audio_s += job.samples.len() as f64 / SR;
             if let JobKind::Final(_) = job.kind {
                 self.stats.final_decode_s += decode_s;

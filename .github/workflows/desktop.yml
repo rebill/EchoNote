@@ -1,0 +1,101 @@
+name: Desktop
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+      - "feat/standalone-app"
+    paths:
+      - "crates/**"
+      - "app/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "scripts/dev/fetch_sherpa_onnx.py"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "crates/**"
+      - "app/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "scripts/dev/fetch_sherpa_onnx.py"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SHERPA_ONNX_ARCHIVE_DIR: ${{ github.workspace }}/.sherpa-onnx
+
+jobs:
+  core:
+    name: Core (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sherpa-onnx archive
+        uses: actions/cache@v4
+        with:
+          path: .sherpa-onnx
+          key: sherpa-onnx-2.0.1-${{ matrix.target }}
+
+      - name: Fetch sherpa-onnx archive
+        run: python scripts/dev/fetch_sherpa_onnx.py .sherpa-onnx ${{ matrix.target }}
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      # Deterministic synthetic fixtures with a fixed decode-cost model; see
+      # crates/echonote-bench/src/gate.rs.
+      - name: Regression gates
+        run: cargo run --locked -p echonote-bench -- gate --report gate-report.json
+
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-report-${{ matrix.target }}
+          path: gate-report.json
+          if-no-files-found: ignore
