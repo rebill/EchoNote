@@ -42,6 +42,8 @@ pub enum LlmError {
     Interrupted,
     #[error("the server's answer could not be read: {0}")]
     BadResponse(&'static str),
+    #[error("the transcript is empty")]
+    EmptyTranscript,
     #[error("cancelled")]
     Cancelled,
 }
@@ -69,6 +71,7 @@ impl LlmError {
             Self::Timeout => "llm-timeout",
             Self::Interrupted => "llm-interrupted",
             Self::BadResponse(_) => "llm-bad-response",
+            Self::EmptyTranscript => "llm-empty-transcript",
             Self::Cancelled => "cancelled",
         }
     }

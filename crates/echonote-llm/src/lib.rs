@@ -4,16 +4,25 @@
 //!   which covers most hosted services, Ollama and LM Studio) or Anthropic (`/messages`).
 //!   Retries rate limits and server errors before any text arrived; never follows redirects.
 //! - [`Chat`]: what the features need from a client, so tests can use a fake.
-//! - Summaries, Q&A and transcript correction are built on `Chat` in their own modules.
+//! - [`summary`] (notes for a transcript of any length), [`qa`], [`correct`] and
+//!   [`highlights`] are built on `Chat`; [`testing::FakeChat`] scripts them in tests.
 //!
 //! Errors and logs never carry the key, extra header values, prompts or transcript text.
 
 mod cancel;
 mod client;
+pub mod correct;
 mod endpoint;
 mod error;
+pub mod highlights;
+pub mod prompts;
+pub mod qa;
 mod sse;
+pub mod summary;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod tokens;
+pub mod transcript;
 
 pub use cancel::Cancel;
 pub use client::{Chat, Client, Finish, Message, Policy, Request, Role, complete};

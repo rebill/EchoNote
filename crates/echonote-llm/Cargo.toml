@@ -8,6 +8,10 @@ license-file.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# `testing::FakeChat`, a scripted model for other crates' tests and smoke runs.
+testing = []
+
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # The OS TLS stack (Security.framework, SChannel): system certificates, no C toolchain
