@@ -1,6 +1,6 @@
 [package]
 name = "echonote-core"
-description = "EchoNote engine: audio pipeline, VAD, ASR scheduling, storage and LLM integration."
+description = "EchoNote engine: audio pipeline, VAD, ASR scheduling, storage and export."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

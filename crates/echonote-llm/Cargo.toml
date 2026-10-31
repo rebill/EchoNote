@@ -1,0 +1,23 @@
+[package]
+name = "echonote-llm"
+description = "EchoNote LLM features: OpenAI-compatible and Anthropic streaming clients, summaries, Q&A and transcript correction."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# The OS TLS stack (Security.framework, SChannel): system certificates, no C toolchain
+# beyond the platform SDK.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "system-proxy"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["sync", "time"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "net", "rt"] }
