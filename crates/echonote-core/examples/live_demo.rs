@@ -38,6 +38,7 @@ mod demo {
     use echonote_core::pipeline::{
         Job, Output, Pipeline, PipelineConfig, SherpaDetector, SpeechDetector, TimedToken,
     };
+    use echonote_core::text::sanitize;
     use echonote_core::vad::{VadKind, VadSpec};
     use rtrb::{Consumer, RingBuffer};
     use serde_json::json;
@@ -527,7 +528,7 @@ mod demo {
         fn emit(&mut self, mut line: Line, verdict: Verdict) -> Result<()> {
             let hidden = verdict == Verdict::Duplicate;
             let raw_text = match verdict {
-                Verdict::Trim { text } => Some(std::mem::replace(&mut line.text, text)),
+                Verdict::Trim { text } => Some(std::mem::replace(&mut line.text, sanitize(&text))),
                 _ => None,
             };
             let stamp = format!(
@@ -685,7 +686,7 @@ mod demo {
                 text,
                 tokens,
             }) => {
-                let text = strip_tags(&text);
+                let text = sanitize(&strip_tags(&text));
                 if text.is_empty() {
                     return Ok(());
                 }

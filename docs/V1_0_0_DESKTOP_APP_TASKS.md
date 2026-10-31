@@ -72,7 +72,7 @@ Acceptance targets:
 - [ ] Native WASAPI source (windows-rs) with a silent render stream so loopback stays on the device clock; process loopback on Windows 11.
 - [ ] macOS tap: enable only the tap stream (`kAudioDevicePropertyIOProcStreamUsage`), handle tap format changes, timestamp from `AudioTimeStamp`.
 - [ ] Overload policy: drop previews first; never drop audio or finals; drain on stop.
-- [ ] Port `text_sanitizer` (repeated-run collapse) and its tests from `asr-service`.
+- [x] Port `text_sanitizer` (repeated-run collapse) and its tests from `asr-service` (`echonote-core::text`; matches the Python output on 3,005 generated cases).
 - [x] Mic/sys duplicate suppression: time-aligned token matching, token-level trimming, provisional decision from sys previews (`echonote-core::crosstalk`); sys finals decode first.
 - [ ] Recorded double-talk eval set (real speakers and room) with false-deletion and miss-rate gates; the synthetic `meeting-zh-dual` bleed run is the stand-in.
 - [ ] Session state machine: idle, starting, recording, paused, stopping, finalized, recovered.
