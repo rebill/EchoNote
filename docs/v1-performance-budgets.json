@@ -1,0 +1,45 @@
+{
+  "status": "draft: thresholds from the PRD; frozen after the idle-time M0 matrix and the Windows run",
+  "baseline": {
+    "cpuCores": 4,
+    "memoryGiB": 8,
+    "gpu": false
+  },
+  "app": {
+    "recordPressToCaptureMs": 300,
+    "coldStartToInteractiveMs": 1500,
+    "idleTrayCpuPercent": 0.5,
+    "idleTrayMemoryMiB": 150,
+    "installerMiB": 300,
+    "ipcLiveEventMaxHz": 10
+  },
+  "live": {
+    "firstPreviewP95Ms": 1000,
+    "finalLatencyP95Ms": 1500,
+    "stopToAllFinalsStoredMs": 3000,
+    "machineCpuShareDualTrackMax": 0.15,
+    "recordingMemoryMiB": 500,
+    "recordingMemoryNote": "PRD value; proposed split pending user sign-off: core steady 450, core peak 550, WebView processes 150",
+    "cpuCoreSecondsPerAudioSecondMax": 0.6,
+    "hardCapSeconds": 12,
+    "previewIntervalMinSeconds": 0.6
+  },
+  "benchGates": {
+    "decodedAudioPerAudioSecondMax": null,
+    "maxFinalQueue": null,
+    "senseVoiceAishellCerMax": null,
+    "invariantsMustPass": true,
+    "note": "null values are filled from the frozen M0 results with a 10% margin"
+  },
+  "capture": {
+    "maxTrackOffsetMs": 20,
+    "ringBufferSeconds": 10,
+    "asrBacklogSpillSeconds": 60,
+    "oggPageFlushSeconds": 1
+  },
+  "recording": {
+    "opusSampleRate": 16000,
+    "opusBitrateKbps": 24,
+    "opusFrameMs": 20
+  }
+}

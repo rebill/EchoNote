@@ -1,0 +1,29 @@
+[package]
+name = "echonote-bench"
+description = "EchoNote ASR evaluation and pipeline benchmarks (RTF, CER/WER, latency, invariants)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["static"]
+static = ["echonote-core/static"]
+shared = ["echonote-core/shared"]
+
+[dependencies]
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+echonote-core = { path = "../echonote-core", default-features = false }
+hound.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sherpa-onnx.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }

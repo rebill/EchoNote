@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<script src="samples.js"></script>
+<script>
+// For each sample: canPlayType, MSE support, muted <audio> load/seek/play, and decodeAudioData.
+const wait = (target, event, ms) =>
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(`timeout:${event}`), ms);
+    target.addEventListener(event, () => { clearTimeout(timer); resolve("ok"); }, { once: true });
+    target.addEventListener("error", () => {
+      clearTimeout(timer);
+      resolve(`error:${target.error ? target.error.code + " " + target.error.message : "?"}`);
+    }, { once: true });
+  });
+
+const log = (text) => window.webkit.messageHandlers.log.postMessage(text);
+const within = (promise, ms, label) =>
+  Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(`timeout:${label}`), ms))]);
+
+async function element(file) {
+  const audio = new Audio();
+  audio.muted = true;
+  audio.preload = "auto";
+  audio.src = file;
+  const loaded = await wait(audio, "loadedmetadata", 5000);
+  if (loaded !== "ok") return { loaded };
+  const duration = audio.duration;
+  audio.currentTime = 5;
+  const seeked = await wait(audio, "seeked", 5000);
+  let played = "skipped";
+  try {
+    const started = await within(audio.play().then(() => "ok"), 3000, "play");
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    played = audio.currentTime > 5.5 ? "ok" : `${started}, at ${audio.currentTime.toFixed(2)}`;
+  } catch (error) {
+    played = `error:${error.name}`;
+  }
+  audio.pause();
+  return { loaded, duration: Number(duration.toFixed(3)), seeked, played };
+}
+
+async function decode(base64) {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const context = new OfflineAudioContext(1, 16000, 16000);
+  try {
+    const buffer = await within(context.decodeAudioData(bytes.buffer), 5000, "decode");
+    if (typeof buffer === "string") return buffer;
+    return `ok ${buffer.duration.toFixed(2)}s @${buffer.sampleRate}`;
+  } catch (error) {
+    return `error:${error.name}`;
+  }
+}
+
+(async () => {
+  const results = { userAgent: navigator.userAgent, formats: {} };
+  for (const sample of SAMPLES) {
+    log(sample.name);
+    const probe = new Audio();
+    results.formats[sample.name] = {
+      mime: sample.mime,
+      canPlayType: probe.canPlayType(sample.mime) || "no",
+      mse: typeof MediaSource !== "undefined" ? MediaSource.isTypeSupported(sample.mime) : "absent",
+      managedMse: typeof ManagedMediaSource !== "undefined" ? ManagedMediaSource.isTypeSupported(sample.mime) : "absent",
+      element: await element(sample.file),
+      decodeAudioData: await decode(sample.base64),
+    };
+  }
+  window.webkit.messageHandlers.result.postMessage(JSON.stringify(results, null, 1));
+})();
+</script>

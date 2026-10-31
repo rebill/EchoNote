@@ -1,0 +1,987 @@
+//! Live transcription demo in the terminal: the microphone is "我", system audio is "对方".
+//!
+//! Same pipeline shape as the planned engine: per-track Silero VAD with a 12 s hard cap, one
+//! SenseVoice worker serving both tracks (finals first, at most one queued preview per track),
+//! and mic finals that repeat what system audio just played are marked as crosstalk.
+//!
+//! macOS: run through `scripts/dev/live_demo.sh`. Writes mic.wav, sys.wav (16 kHz) and
+//! transcript.jsonl to `<out_dir>` and stops when `<out_dir>/stop` appears. Windows loopback
+//! sends nothing while the output is silent, so system-audio timestamps drift there.
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn main() {
+    eprintln!("live_demo supports macOS and Windows only");
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn main() -> anyhow::Result<()> {
+    demo::run()
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod demo {
+    use std::collections::VecDeque;
+    use std::fs::File;
+    use std::io::{BufWriter, Write};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::{self, Sender};
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::{Duration, Instant};
+
+    use anyhow::{Context, Result};
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use echonote_core::asr::{ModelKind, OfflineAsr, OfflineModelSpec};
+    use echonote_core::vad::{Vad, VadKind, VadSpec};
+    use rtrb::{Consumer, RingBuffer};
+    use serde_json::json;
+    use sherpa_onnx::LinearResampler;
+
+    const SR: usize = 16_000;
+    const RING: usize = 1 << 22;
+    const HARD_CAP: usize = SR * 12;
+    const SPLIT_SEARCH: usize = SR * 2;
+    const SPLIT_FRAME: usize = SR / 50;
+    const MIN_SEGMENT: usize = SR / 4;
+    const MIN_PREVIEW: usize = SR * 3 / 10;
+    const PREVIEW_INTERVAL: Duration = Duration::from_millis(600);
+    /// How long a mic final may wait for the system track to confirm or rule out crosstalk.
+    const MIC_WAIT: Duration = Duration::from_secs(3);
+    const MIC: usize = 0;
+    const SYS: usize = 1;
+    /// One capture source: an audio callback feeding a lock-free ring.
+    struct Source {
+        _guard: Box<dyn std::any::Any>,
+        samples: Consumer<f32>,
+        dropped: Arc<AtomicU64>,
+        rate: u32,
+        channels: usize,
+        name: String,
+    }
+
+    /// Real-time safe push: no allocation, no lock; overflow is counted, not blocked on.
+    fn ring() -> (
+        impl FnMut(&[f32]) + Send + 'static,
+        Consumer<f32>,
+        Arc<AtomicU64>,
+    ) {
+        let (mut producer, consumer) = RingBuffer::new(RING);
+        let dropped = Arc::new(AtomicU64::new(0));
+        let counter = dropped.clone();
+        let push = move |data: &[f32]| match producer.write_chunk_uninit(data.len()) {
+            Ok(chunk) => {
+                chunk.fill_from_iter(data.iter().copied());
+            }
+            Err(_) => {
+                counter.fetch_add(data.len() as u64, Ordering::Relaxed);
+            }
+        };
+        (push, consumer, dropped)
+    }
+
+    fn start_mic(host: &cpal::Host) -> Result<Source> {
+        let device = host
+            .default_input_device()
+            .context("no default input device")?;
+        let config = device.default_input_config()?;
+        anyhow::ensure!(
+            config.sample_format() == cpal::SampleFormat::F32,
+            "expected f32 mic samples, device default is {:?}",
+            config.sample_format()
+        );
+        let (mut push, samples, dropped) = ring();
+        let stream = device.build_input_stream(
+            config.config(),
+            move |data: &[f32], _| push(data),
+            |error| eprintln!("mic stream error: {error}"),
+            None,
+        )?;
+        stream.play()?;
+        Ok(Source {
+            _guard: Box::new(stream),
+            samples,
+            dropped,
+            rate: config.sample_rate(),
+            channels: config.channels() as usize,
+            name: device
+                .description()
+                .map(|description| description.to_string())
+                .unwrap_or_default(),
+        })
+    }
+    #[cfg(target_os = "macos")]
+    fn start_system(_host: &cpal::Host) -> Result<Source> {
+        use echonote_core::capture::macos_tap::SystemTap;
+        let (mut push, samples, dropped) = ring();
+        let tap = SystemTap::start(move |data, _host_ns| push(data))?;
+        let format = tap.format();
+        Ok(Source {
+            _guard: Box::new(tap),
+            samples,
+            dropped,
+            rate: format.sample_rate as u32,
+            channels: format.channels.max(1) as usize,
+            name: "Core Audio process tap".into(),
+        })
+    }
+
+    #[cfg(target_os = "windows")]
+    fn start_system(host: &cpal::Host) -> Result<Source> {
+        let device = host
+            .default_output_device()
+            .context("no default output device")?;
+        let config = device.default_output_config()?;
+        anyhow::ensure!(
+            config.sample_format() == cpal::SampleFormat::F32,
+            "expected f32 loopback samples, device default is {:?}",
+            config.sample_format()
+        );
+        let (mut push, samples, dropped) = ring();
+        let stream = device.build_input_stream(
+            config.config(),
+            move |data: &[f32], _| push(data),
+            |error| eprintln!("loopback stream error: {error}"),
+            None,
+        )?;
+        stream.play()?;
+        Ok(Source {
+            _guard: Box::new(stream),
+            samples,
+            dropped,
+            rate: config.sample_rate(),
+            channels: config.channels() as usize,
+            name: format!(
+                "WASAPI loopback: {}",
+                device
+                    .description()
+                    .map(|description| description.to_string())
+                    .unwrap_or_default()
+            ),
+        })
+    }
+
+    /// Development source: plays a recorded WAV into the ring at real-time pace
+    /// (`ECHONOTE_DEMO_REPLAY=<dir with mic16.wav and sys16.wav>`).
+    fn replay(path: &Path) -> Result<Source> {
+        let mut reader =
+            hound::WavReader::open(path).with_context(|| format!("open {}", path.display()))?;
+        let spec = reader.spec();
+        let samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
+            hound::SampleFormat::Int => {
+                let scale = (1u32 << (spec.bits_per_sample - 1)) as f32;
+                reader
+                    .samples::<i32>()
+                    .map(|sample| sample.map(|value| value as f32 / scale))
+                    .collect::<Result<_, _>>()?
+            }
+        };
+        let (mut push, consumer, dropped) = ring();
+        let block = spec.sample_rate as usize / 100 * spec.channels as usize;
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            for (index, chunk) in samples.chunks(block).enumerate() {
+                let due = started + Duration::from_millis(10 * index as u64);
+                std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                push(chunk);
+            }
+        });
+        Ok(Source {
+            _guard: Box::new(()),
+            samples: consumer,
+            dropped,
+            rate: spec.sample_rate,
+            channels: spec.channels as usize,
+            name: format!("replay {}", path.display()),
+        })
+    }
+
+    struct Job {
+        track: usize,
+        start: usize,
+        samples: Vec<f32>,
+    }
+    /// Work for the single decoder: finals in order, plus the newest preview of each track.
+    #[derive(Default)]
+    struct Queue {
+        finals: VecDeque<Job>,
+        previews: [Option<Job>; 2],
+        stop: bool,
+    }
+
+    type Shared = Arc<(Mutex<Queue>, Condvar)>;
+
+    enum Event {
+        Loaded(f64),
+        LoadFailed(String),
+        Decoded {
+            track: usize,
+            start: usize,
+            len: usize,
+            is_final: bool,
+            text: String,
+            decode_s: f64,
+        },
+    }
+
+    fn worker(spec: OfflineModelSpec, shared: Shared, events: Sender<Event>) {
+        let started = Instant::now();
+        let asr = match OfflineAsr::load(&spec) {
+            Ok(asr) => asr,
+            Err(error) => {
+                let _ = events.send(Event::LoadFailed(error.to_string()));
+                return;
+            }
+        };
+        let _ = events.send(Event::Loaded(started.elapsed().as_secs_f64()));
+        let mut next_preview = 0;
+        loop {
+            let (job, is_final) = {
+                let (lock, ready) = &*shared;
+                let mut queue = lock.lock().unwrap();
+                loop {
+                    if let Some(job) = queue.finals.pop_front() {
+                        break (job, true);
+                    }
+                    let slot = (0..2)
+                        .map(|offset| (next_preview + offset) % 2)
+                        .find(|&i| queue.previews[i].is_some());
+                    if let Some(slot) = slot.filter(|_| !queue.stop) {
+                        next_preview = slot + 1;
+                        break (queue.previews[slot].take().unwrap(), false);
+                    }
+                    if queue.stop {
+                        return;
+                    }
+                    queue = ready.wait(queue).unwrap();
+                }
+            };
+            let started = Instant::now();
+            let text = strip_tags(&asr.decode(&job.samples));
+            let decode_s = started.elapsed().as_secs_f64();
+            let len = job.samples.len();
+            let event = Event::Decoded {
+                track: job.track,
+                start: job.start,
+                len,
+                is_final,
+                text,
+                decode_s,
+            };
+            if events.send(event).is_err() {
+                return;
+            }
+        }
+    }
+    /// One track on its own 16 kHz sample clock. `audio` holds samples from index `base`.
+    struct Track {
+        index: usize,
+        source: Source,
+        resampler: Option<LinearResampler>,
+        vad: Vad,
+        window: usize,
+        preroll: usize,
+        audio: Vec<f32>,
+        base: usize,
+        fed: usize,
+        committed: usize,
+        speech_start: Option<usize>,
+        last_preview: Instant,
+        preview_interval: Duration,
+        preview: String,
+        finals_in_flight: usize,
+        /// Session time of sample 0, set when the first samples arrive.
+        offset_s: Option<f64>,
+        wav: hound::WavWriter<BufWriter<File>>,
+    }
+
+    impl Track {
+        fn new(index: usize, source: Source, spec: &VadSpec, wav: &Path) -> Result<Self> {
+            let resampler = if source.rate as usize == SR {
+                None
+            } else {
+                Some(
+                    LinearResampler::create(source.rate as i32, SR as i32)
+                        .context("create resampler")?,
+                )
+            };
+            let wav_spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: SR as u32,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            Ok(Self {
+                index,
+                source,
+                resampler,
+                vad: Vad::create(spec)?,
+                window: spec.window_size(),
+                preroll: 2 * spec.window_size() + (spec.min_speech_s * SR as f32) as usize,
+                audio: Vec::new(),
+                base: 0,
+                fed: 0,
+                committed: 0,
+                speech_start: None,
+                last_preview: Instant::now(),
+                preview_interval: PREVIEW_INTERVAL,
+                preview: String::new(),
+                finals_in_flight: 0,
+                offset_s: None,
+                wav: hound::WavWriter::create(wav, wav_spec)?,
+            })
+        }
+        fn total(&self) -> usize {
+            self.base + self.audio.len()
+        }
+
+        fn slice(&self, start: usize, end: usize) -> &[f32] {
+            &self.audio[start - self.base..end - self.base]
+        }
+
+        fn seconds_at(&self, sample: usize) -> f64 {
+            self.offset_s.unwrap_or(0.0) + sample as f64 / SR as f64
+        }
+
+        /// Drain the ring, downmix, resample to 16 kHz, append and save.
+        fn pull(&mut self, session: Instant) -> Result<()> {
+            let channels = self.source.channels;
+            let available = self.source.samples.slots() / channels * channels;
+            if available == 0 {
+                return Ok(());
+            }
+            let Ok(chunk) = self.source.samples.read_chunk(available) else {
+                return Ok(());
+            };
+            let (first, second) = chunk.as_slices();
+            let interleaved: Vec<f32> = first.iter().chain(second).copied().collect();
+            chunk.commit_all();
+            let mono: Vec<f32> = if channels == 1 {
+                interleaved
+            } else {
+                interleaved
+                    .chunks_exact(channels)
+                    .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+                    .collect()
+            };
+            if self.offset_s.is_none() {
+                let captured = Duration::from_secs_f64(mono.len() as f64 / self.source.rate as f64);
+                let elapsed = session.elapsed().saturating_sub(captured);
+                self.offset_s = Some(elapsed.as_secs_f64());
+            }
+            let samples = match &self.resampler {
+                Some(resampler) => resampler.resample(&mono, false),
+                None => mono,
+            };
+            for sample in &samples {
+                self.wav
+                    .write_sample((sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
+            }
+            self.audio.extend_from_slice(&samples);
+            // Keep only what an open utterance or the next onset can still reach.
+            let keep = self
+                .speech_start
+                .unwrap_or(usize::MAX)
+                .min(self.fed.saturating_sub(self.preroll));
+            if keep > self.base + SR * 30 {
+                self.audio.drain(..keep - self.base);
+                self.base = keep;
+            }
+            Ok(())
+        }
+        /// Feed whole VAD windows; queue finals at pauses and at the hard cap; request previews.
+        fn step(&mut self, shared: &Shared) {
+            while self.fed + self.window <= self.total() {
+                let end = self.fed + self.window;
+                self.vad.accept_window(self.slice(self.fed, end));
+                self.fed = end;
+                if self.vad.in_speech() && self.speech_start.is_none() {
+                    self.speech_start =
+                        Some(self.fed.saturating_sub(self.preroll).max(self.committed));
+                }
+                self.collect(shared);
+                if !self.vad.in_speech() {
+                    self.end_utterance(shared);
+                }
+                self.force_split(shared);
+            }
+            self.request_preview(shared);
+        }
+
+        /// Queue VAD segments, minus anything a forced split already emitted.
+        fn collect(&mut self, shared: &Shared) {
+            while let Some(segment) = self.vad.pop_segment() {
+                let vad_start = segment.start_sample as usize;
+                let end = vad_start + segment.samples.len();
+                let skip = self
+                    .committed
+                    .saturating_sub(vad_start)
+                    .min(segment.samples.len());
+                if segment.samples.len() - skip >= MIN_SEGMENT {
+                    self.queue_final(shared, vad_start + skip, segment.samples[skip..].to_vec());
+                }
+                self.committed = self.committed.max(end);
+                let continues = self.vad.in_speech();
+                self.end_utterance(shared);
+                if continues {
+                    self.speech_start = Some(end);
+                }
+            }
+        }
+
+        /// sherpa's max_speech_duration does not split continuous speech, so cut at the
+        /// quietest 20 ms frame of the last 2 s once an utterance reaches the cap.
+        fn force_split(&mut self, shared: &Shared) {
+            let Some(start) = self.speech_start else {
+                return;
+            };
+            if self.fed - start < HARD_CAP {
+                return;
+            }
+            let mut cut = (f32::INFINITY, self.fed);
+            let mut position = self
+                .fed
+                .saturating_sub(SPLIT_SEARCH)
+                .max(start + MIN_SEGMENT);
+            while position + SPLIT_FRAME <= self.fed {
+                let energy: f32 = self
+                    .slice(position, position + SPLIT_FRAME)
+                    .iter()
+                    .map(|s| s * s)
+                    .sum();
+                if energy < cut.0 {
+                    cut = (energy, position + SPLIT_FRAME / 2);
+                }
+                position += SPLIT_FRAME;
+            }
+            let cut = cut.1;
+            let samples = self.slice(start, cut).to_vec();
+            self.queue_final(shared, start, samples);
+            self.committed = cut;
+            self.end_utterance(shared);
+            self.speech_start = Some(cut);
+        }
+        fn queue_final(&mut self, shared: &Shared, start: usize, samples: Vec<f32>) {
+            let (lock, ready) = &**shared;
+            lock.lock().unwrap().finals.push_back(Job {
+                track: self.index,
+                start,
+                samples,
+            });
+            ready.notify_one();
+            self.finals_in_flight += 1;
+        }
+
+        fn end_utterance(&mut self, shared: &Shared) {
+            if self.speech_start.take().is_some() {
+                shared.0.lock().unwrap().previews[self.index] = None;
+                self.preview.clear();
+            }
+        }
+
+        /// Re-decode the growing utterance; the interval adapts to twice the last decode time.
+        fn request_preview(&mut self, shared: &Shared) {
+            let Some(start) = self.speech_start else {
+                return;
+            };
+            if self.fed - start < MIN_PREVIEW || self.last_preview.elapsed() < self.preview_interval
+            {
+                return;
+            }
+            self.last_preview = Instant::now();
+            let job = Job {
+                track: self.index,
+                start,
+                samples: self.slice(start, self.fed).to_vec(),
+            };
+            let (lock, ready) = &**shared;
+            lock.lock().unwrap().previews[self.index] = Some(job);
+            ready.notify_one();
+        }
+
+        fn finish(&mut self, shared: &Shared) -> Result<()> {
+            if let Some(resampler) = &self.resampler {
+                let tail = resampler.resample(&[], true);
+                self.audio.extend_from_slice(&tail);
+            }
+            self.step(shared);
+            self.vad.flush();
+            self.collect(shared);
+            if let Some(start) = self
+                .speech_start
+                .filter(|start| self.fed - start >= MIN_SEGMENT)
+            {
+                let samples = self.slice(start, self.fed).to_vec();
+                self.queue_final(shared, start, samples);
+            }
+            self.end_utterance(shared);
+            Ok(())
+        }
+    }
+
+    /// SenseVoice can emit `<|zh|><|NEUTRAL|>`-style tags; keep only the text.
+    fn strip_tags(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(open) = rest.find("<|") {
+            out.push_str(&rest[..open]);
+            match rest[open..].find("|>") {
+                Some(close) => rest = &rest[open + close + 2..],
+                None => {
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        out.trim().to_owned()
+    }
+    /// CJK characters are single tokens; Latin letters and digits form lowercase words.
+    fn tokens(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut word = String::new();
+        for ch in text.chars() {
+            if ch.is_ascii_alphanumeric() {
+                word.push(ch.to_ascii_lowercase());
+                continue;
+            }
+            if !word.is_empty() {
+                out.push(std::mem::take(&mut word));
+            }
+            if ch.is_alphanumeric() {
+                out.push(ch.to_string());
+            }
+        }
+        if !word.is_empty() {
+            out.push(word);
+        }
+        out
+    }
+
+    fn lcs(a: &[String], b: &[String]) -> usize {
+        let mut row = vec![0usize; b.len() + 1];
+        for x in a {
+            let mut diagonal = 0;
+            for (j, y) in b.iter().enumerate() {
+                let above = row[j + 1];
+                row[j + 1] = if x == y {
+                    diagonal + 1
+                } else {
+                    row[j + 1].max(row[j])
+                };
+                diagonal = above;
+            }
+        }
+        row[b.len()]
+    }
+
+    struct Line {
+        track: usize,
+        start_s: f64,
+        end_s: f64,
+        text: String,
+        latency_s: f64,
+        arrived: Instant,
+    }
+
+    /// Terminal output and transcript file. Styled lines and the one-line status go straight to
+    /// the terminal device (`ECHONOTE_DEMO_TTY`); stdout gets the same lines as plain text.
+    struct Session {
+        tty: Option<File>,
+        columns: usize,
+        transcript: BufWriter<File>,
+        status: String,
+        pending_mic: VecDeque<Line>,
+        recent_sys: VecDeque<Line>,
+        latencies: Vec<f64>,
+        lines: [usize; 2],
+        crosstalk: usize,
+        busy_s: f64,
+    }
+
+    /// Terminal columns used by a string: wide (CJK and other non-ASCII) characters count two.
+    fn columns(text: &str) -> usize {
+        text.chars()
+            .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+            .sum()
+    }
+
+    /// The end of `text` that fits in `budget` columns.
+    fn tail_fit(text: &str, budget: usize) -> String {
+        let mut used = 0;
+        let mut kept: Vec<char> = Vec::new();
+        for ch in text.chars().rev() {
+            used += if ch.is_ascii() { 1 } else { 2 };
+            if used > budget {
+                break;
+            }
+            kept.push(ch);
+        }
+        kept.iter().rev().collect()
+    }
+    /// What the system track is saying right now, for the crosstalk check.
+    struct SysNow {
+        busy: bool,
+        preview_start_s: Option<f64>,
+        preview: String,
+    }
+
+    impl Session {
+        /// Print a finished line above the status line.
+        fn print(&mut self, styled: &str, plain: &str) {
+            let mut stdout = std::io::stdout();
+            let _ = writeln!(stdout, "{plain}");
+            let _ = stdout.flush();
+            if let Some(tty) = self.tty.as_mut() {
+                let _ = write!(tty, "\r\x1b[2K{styled}\n\x1b[2m{}\x1b[0m", self.status);
+                let _ = tty.flush();
+            }
+        }
+
+        fn draw_status(&mut self) {
+            if let Some(tty) = self.tty.as_mut() {
+                let _ = write!(tty, "\r\x1b[2K\x1b[2m{}\x1b[0m", self.status);
+                let _ = tty.flush();
+            }
+        }
+
+        fn say(&mut self, message: &str) {
+            self.print(message, message);
+        }
+
+        fn emit(&mut self, line: Line, crosstalk: bool) -> Result<()> {
+            let stamp = format!(
+                "{:02}:{:02}",
+                line.start_s as u64 / 60,
+                line.start_s as u64 % 60
+            );
+            let speaker = if line.track == MIC { "我  " } else { "对方" };
+            let plain = format!(
+                "{stamp} {speaker} {}{}",
+                if crosstalk { "[外放串音] " } else { "" },
+                line.text
+            );
+            // Crosstalk is only counted on the status line; transcript.jsonl keeps its text.
+            if !crosstalk {
+                let color = if line.track == MIC { 36 } else { 33 };
+                let styled = format!("{stamp} \x1b[{color}m{speaker}\x1b[0m {}", line.text);
+                self.print(&styled, &plain);
+            } else {
+                let mut stdout = std::io::stdout();
+                let _ = writeln!(stdout, "{plain}");
+                let _ = stdout.flush();
+            }
+            let record = json!({
+                "track": if line.track == MIC { "mic" } else { "sys" },
+                "start_s": (line.start_s * 1000.0).round() / 1000.0,
+                "end_s": (line.end_s * 1000.0).round() / 1000.0,
+                "text": line.text,
+                "crosstalk": crosstalk,
+                "latency_s": (line.latency_s * 1000.0).round() / 1000.0,
+            });
+            writeln!(self.transcript, "{record}")?;
+            self.transcript.flush()?;
+            self.lines[line.track] += 1;
+            self.crosstalk += crosstalk as usize;
+            self.latencies.push(line.latency_s);
+            if line.track == SYS {
+                self.recent_sys.push_back(line);
+                if self.recent_sys.len() > 50 {
+                    self.recent_sys.pop_front();
+                }
+            }
+            self.draw_status();
+            Ok(())
+        }
+        /// Emit mic finals once the system track can confirm or rule out crosstalk.
+        fn release_mic(&mut self, sys: &SysNow, force: bool) -> Result<()> {
+            while let Some(line) = self.pending_mic.front() {
+                let mic_tokens = tokens(&line.text);
+                let mut sys_tokens: Vec<String> = self
+                    .recent_sys
+                    .iter()
+                    .filter(|other| {
+                        other.end_s >= line.start_s - 0.5 && other.start_s <= line.end_s + 0.5
+                    })
+                    .flat_map(|other| tokens(&other.text))
+                    .collect();
+                if sys
+                    .preview_start_s
+                    .is_some_and(|start| start <= line.end_s + 0.5)
+                {
+                    sys_tokens.extend(tokens(&sys.preview));
+                }
+                let similarity =
+                    lcs(&mic_tokens, &sys_tokens) as f64 / mic_tokens.len().max(1) as f64;
+                let crosstalk = mic_tokens.len() >= 2 && similarity >= 0.6;
+                if !crosstalk && !force && sys.busy && line.arrived.elapsed() < MIC_WAIT {
+                    return Ok(());
+                }
+                let line = self.pending_mic.pop_front().unwrap();
+                self.emit(line, crosstalk)?;
+            }
+            Ok(())
+        }
+
+        /// One status line that never wraps: the system track's preview while it speaks (the
+        /// mic then mostly hears the speakers), otherwise the mic preview.
+        fn update_status(&mut self, loaded: bool, sys_speaking: bool, previews: [&str; 2]) {
+            let hidden = if self.crosstalk > 0 {
+                format!("  （已隐藏外放串音 {} 句）", self.crosstalk)
+            } else {
+                String::new()
+            };
+            let (label, preview) = if sys_speaking {
+                ("对方", previews[SYS])
+            } else {
+                ("我", previews[MIC])
+            };
+            let status = if !loaded {
+                "正在加载模型…".to_owned()
+            } else if preview.is_empty() {
+                let idle = if sys_speaking {
+                    "● 对方说话中"
+                } else {
+                    "● 录音中"
+                };
+                format!("{idle}{hidden}")
+            } else {
+                let fixed = format!("● {label}：…{hidden}");
+                let budget = self.columns.saturating_sub(columns(&fixed) + 2);
+                format!("● {label}：…{}{hidden}", tail_fit(preview, budget))
+            };
+            if status != self.status {
+                self.status = status;
+                self.draw_status();
+            }
+        }
+    }
+
+    fn data_dir() -> PathBuf {
+        if let Some(path) = std::env::var_os("ECHONOTE_DEV_DATA") {
+            return PathBuf::from(path);
+        }
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .unwrap_or_default();
+        PathBuf::from(home).join(".cache").join("echonote-dev")
+    }
+
+    fn sys_now(track: &Track) -> SysNow {
+        SysNow {
+            busy: track.speech_start.is_some() || track.finals_in_flight > 0,
+            preview_start_s: track.speech_start.map(|start| track.seconds_at(start)),
+            preview: track.preview.clone(),
+        }
+    }
+    /// Apply one decoder event; returns true when the model has just loaded.
+    fn handle(event: Event, tracks: &mut [Track], session: &mut Session) -> Result<bool> {
+        let (track, start, len, is_final, text, decode_s) = match event {
+            Event::Loaded(seconds) => {
+                session.say(&format!(
+                    "模型加载完成（{seconds:.1} s），开始转录。按 Ctrl+C 结束。\n"
+                ));
+                return Ok(true);
+            }
+            Event::LoadFailed(error) => anyhow::bail!("加载模型失败：{error}"),
+            Event::Decoded {
+                track,
+                start,
+                len,
+                is_final,
+                text,
+                decode_s,
+            } => (track, start, len, is_final, text, decode_s),
+        };
+        session.busy_s += decode_s;
+        let current = &mut tracks[track];
+        if !is_final {
+            if current.speech_start == Some(start) {
+                current.preview = text;
+            }
+            current.preview_interval =
+                PREVIEW_INTERVAL.max(Duration::from_secs_f64(2.0 * decode_s));
+            return Ok(false);
+        }
+        current.finals_in_flight -= 1;
+        if text.is_empty() {
+            return Ok(false);
+        }
+        let start_s = current.seconds_at(start);
+        let end_s = current.seconds_at(start + len);
+        let available_s = current.seconds_at(current.total());
+        let line = Line {
+            track,
+            start_s,
+            end_s,
+            text,
+            latency_s: (available_s - end_s).max(0.0),
+            arrived: Instant::now(),
+        };
+        if track == SYS {
+            session.emit(line, false)?;
+        } else {
+            session.pending_mic.push_back(line);
+        }
+        Ok(false)
+    }
+
+    pub fn run() -> Result<()> {
+        let mut args = std::env::args().skip(1);
+        let out_dir = PathBuf::from(
+            args.next()
+                .context("usage: live_demo <out_dir> [max_minutes]")?,
+        );
+        let max_minutes: u64 = args
+            .next()
+            .map(|value| value.parse())
+            .transpose()?
+            .unwrap_or(120);
+        std::fs::create_dir_all(&out_dir)?;
+        let models = data_dir().join("models");
+        let model_dir = models.join("sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09");
+        anyhow::ensure!(
+            model_dir.is_dir(),
+            "{} not found; run scripts/dev/fetch_assets.py",
+            model_dir.display()
+        );
+
+        // Start loading the model first; audio is buffered while it loads.
+        let spec = OfflineModelSpec::new(ModelKind::SenseVoice, model_dir);
+        let shared: Shared = Arc::default();
+        let (events, received) = mpsc::channel();
+        let decoder = {
+            let shared = shared.clone();
+            std::thread::spawn(move || worker(spec, shared, events))
+        };
+        let tty = match std::env::var_os("ECHONOTE_DEMO_TTY") {
+            Some(path) => match std::fs::OpenOptions::new().write(true).open(&path) {
+                Ok(file) => {
+                    println!("@tty");
+                    Some(file)
+                }
+                Err(error) => {
+                    eprintln!("cannot write to {}: {error}", PathBuf::from(path).display());
+                    None
+                }
+            },
+            None => None,
+        };
+        let columns = std::env::var("ECHONOTE_DEMO_COLUMNS")
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(100)
+            .clamp(40, 160);
+        let mut session = Session {
+            tty,
+            columns,
+            transcript: BufWriter::new(File::create(out_dir.join("transcript.jsonl"))?),
+            status: String::new(),
+            pending_mic: VecDeque::new(),
+            recent_sys: VecDeque::new(),
+            latencies: Vec::new(),
+            lines: [0, 0],
+            crosstalk: 0,
+            busy_s: 0.0,
+        };
+        let started = Instant::now();
+        let (mic, system) = match std::env::var_os("ECHONOTE_DEMO_REPLAY") {
+            Some(dir) => {
+                let dir = PathBuf::from(dir);
+                (
+                    replay(&dir.join("mic16.wav"))?,
+                    replay(&dir.join("sys16.wav"))?,
+                )
+            }
+            None => {
+                let host = cpal::default_host();
+                (
+                    start_mic(&host)?,
+                    start_system(&host).context("start system audio")?,
+                )
+            }
+        };
+        session.say(&format!("麦克风：{}（{} Hz）", mic.name, mic.rate));
+        session.say(&format!("系统音频：{}（{} Hz）", system.name, system.rate));
+        let vad_spec =
+            VadSpec::meeting(VadKind::Silero, models.join("vad").join("silero_vad.onnx"));
+        let mut tracks = [
+            Track::new(MIC, mic, &vad_spec, &out_dir.join("mic.wav"))?,
+            Track::new(SYS, system, &vad_spec, &out_dir.join("sys.wav"))?,
+        ];
+
+        let stop_file = out_dir.join("stop");
+        let deadline = started + Duration::from_secs(max_minutes * 60);
+        let mut loaded = false;
+        session.update_status(loaded, false, ["", ""]);
+        while !stop_file.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(30));
+            for track in tracks.iter_mut() {
+                track.pull(started)?;
+                track.step(&shared);
+            }
+            while let Ok(event) = received.try_recv() {
+                loaded |= handle(event, &mut tracks, &mut session)?;
+            }
+            session.release_mic(&sys_now(&tracks[SYS]), false)?;
+            let sys_speaking = tracks[SYS].speech_start.is_some();
+            session.update_status(
+                loaded,
+                sys_speaking,
+                [&tracks[MIC].preview, &tracks[SYS].preview],
+            );
+        }
+
+        for track in tracks.iter_mut() {
+            track.pull(started)?;
+            track.finish(&shared)?;
+        }
+        {
+            let (lock, ready) = &*shared;
+            let mut queue = lock.lock().unwrap();
+            queue.stop = true;
+            ready.notify_all();
+        }
+        session.status = "正在转写剩余音频…".to_owned();
+        session.draw_status();
+        for event in received.iter() {
+            handle(event, &mut tracks, &mut session)?;
+        }
+        session.release_mic(&sys_now(&tracks[SYS]), true)?;
+        let _ = decoder.join();
+        let audio_s = tracks
+            .iter()
+            .map(|track| track.total() as f64 / SR as f64)
+            .fold(0.0, f64::max);
+        let mut latencies = session.latencies.clone();
+        latencies.sort_by(f64::total_cmp);
+        let pick = |q: f64| {
+            latencies
+                .get(((latencies.len() as f64 * q).ceil() as usize).saturating_sub(1))
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let dropped: u64 = tracks
+            .iter()
+            .map(|track| track.source.dropped.load(Ordering::Relaxed))
+            .sum();
+        let summary = format!(
+            "\n录音 {:.0} s：我 {} 句（其中外放串音 {} 句），对方 {} 句。定稿延迟 p50 {:.2} s，p95 {:.2} s；\
+             解码占用 {:.2}（两轨合计，1.0 表示解码线程满载）；丢弃样本 {}。\n文件：{}",
+            audio_s,
+            session.lines[MIC],
+            session.crosstalk,
+            session.lines[SYS],
+            pick(0.5),
+            pick(0.95),
+            session.busy_s / audio_s.max(1.0),
+            dropped,
+            out_dir.display(),
+        );
+        session.status.clear();
+        session.say(&summary);
+        for track in tracks {
+            track.wav.finalize()?;
+        }
+        Ok(())
+    }
+}

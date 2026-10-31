@@ -1,0 +1,8 @@
+[env]
+# Process taps need macOS 14.2; keep Rust, C and Objective-C objects on the same target.
+MACOSX_DEPLOYMENT_TARGET = "14.2"
+
+# sherpa-onnx ships Windows static libs built against the static CRT (/MT); link Rust the same
+# way so the executable needs no VC++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

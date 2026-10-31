@@ -1,0 +1,29 @@
+[package]
+name = "echonote-core"
+description = "EchoNote engine: audio pipeline, VAD, ASR scheduling, storage and LLM integration."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["static"]
+static = ["sherpa-onnx/static"]
+shared = ["sherpa-onnx/shared"]
+
+[dependencies]
+sherpa-onnx.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+anyhow.workspace = true
+cpal = "0.18"
+hound.workspace = true
+rtrb = "0.3"
+serde.workspace = true
+serde_json.workspace = true
