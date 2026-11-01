@@ -12,7 +12,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
-      - "scripts/dev/fetch_sherpa_onnx.py"
+      - "scripts/dev/**"
+      - "third_party/**"
       - ".github/workflows/desktop.yml"
   pull_request:
     branches:
@@ -23,8 +24,11 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
-      - "scripts/dev/fetch_sherpa_onnx.py"
+      - "scripts/dev/**"
+      - "third_party/**"
       - ".github/workflows/desktop.yml"
+  # release.yml runs these checks before it builds installers.
+  workflow_call:
 
 permissions:
   contents: read
@@ -98,6 +102,10 @@ jobs:
           pnpm check
           pnpm test
           pnpm build
+
+      - name: Script tests
+        working-directory: scripts/dev
+        run: python -m unittest discover -s tests
 
       - name: Format
         run: cargo fmt --all --check

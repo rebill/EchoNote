@@ -1,0 +1,319 @@
+{
+  "comment": "Components that cargo metadata does not describe: bundled models, native libraries linked through sherpa-onnx-sys and echonote-opus, data files, and the frontend runtime. scripts/dev/gen_notices.py adds the Rust crates. License files are copied from the upstream repositories at the pinned refs. crate_licenses covers crates that publish no license file; the texts come from their repositories (for multi-licensed crates, the MIT text).",
+  "components": [
+    {
+      "group": "Bundled models",
+      "name": "SenseVoiceSmall",
+      "version": "int8, 2025-09-09",
+      "license": "FunASR Model Open Source License 1.1",
+      "source": "https://github.com/FunAudioLLM/SenseVoice",
+      "attribution": "SenseVoiceSmall by the FunAudioLLM team, Tongyi Lab, Alibaba Group. Converted to ONNX and quantized to int8 by the k2-fsa sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx). The model name is kept unchanged.",
+      "files": [
+        "licenses/funasr-model-license.txt"
+      ],
+      "ref": "https://github.com/modelscope/FunASR/blob/3808562dcc5765bfc5d626c8c9642687547021f9/MODEL_LICENSE"
+    },
+    {
+      "group": "Bundled models",
+      "name": "Silero VAD",
+      "version": "4.0",
+      "license": "MIT",
+      "source": "https://github.com/snakers4/silero-vad",
+      "files": [
+        "licenses/silero-vad.txt"
+      ],
+      "ref": "https://github.com/snakers4/silero-vad/blob/v4.0/LICENSE"
+    },
+    {
+      "group": "Models downloaded on request",
+      "name": "Qwen3-ASR 0.6B",
+      "version": "int8, 2026-03-25",
+      "license": "Apache-2.0",
+      "source": "https://github.com/QwenLM/Qwen3-ASR",
+      "attribution": "Qwen3-ASR by the Qwen team, Alibaba Cloud. Not part of the installer; the model manager downloads it when the user asks. Converted to ONNX by the k2-fsa sherpa-onnx project.",
+      "files": [
+        "licenses/sherpa-onnx.txt"
+      ],
+      "ref": "Apache License 2.0 text; the repository declares Apache-2.0"
+    },
+    {
+      "group": "Native libraries",
+      "name": "sherpa-onnx",
+      "version": "2.0.1",
+      "license": "Apache-2.0",
+      "source": "https://github.com/k2-fsa/sherpa-onnx",
+      "files": [
+        "licenses/sherpa-onnx.txt"
+      ],
+      "ref": "https://github.com/k2-fsa/sherpa-onnx/blob/v2.0.1/LICENSE"
+    },
+    {
+      "group": "Native libraries",
+      "name": "ONNX Runtime",
+      "version": "1.28.2",
+      "license": "MIT",
+      "source": "https://github.com/microsoft/onnxruntime",
+      "attribution": "Linked statically. Its own third-party notices (Abseil, Protocol Buffers, RE2, FlatBuffers, Eigen, GSL, SafeInt, Boost and others) follow its license.",
+      "files": [
+        "licenses/onnxruntime.txt",
+        "licenses/onnxruntime-third-party-notices.txt"
+      ],
+      "ref": "https://github.com/microsoft/onnxruntime/blob/v1.28.2/ThirdPartyNotices.txt"
+    },
+    {
+      "group": "Native libraries",
+      "name": "kaldi-native-fbank",
+      "version": "1.22.4",
+      "license": "Apache-2.0",
+      "source": "https://github.com/csukuangfj/kaldi-native-fbank",
+      "files": [
+        "licenses/kaldi-native-fbank.txt"
+      ],
+      "ref": "https://github.com/csukuangfj/kaldi-native-fbank/blob/v1.22.4/LICENSE"
+    },
+    {
+      "group": "Native libraries",
+      "name": "KISS FFT",
+      "version": "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/mborgerding/kissfft",
+      "files": [
+        "licenses/kissfft.txt"
+      ],
+      "ref": "https://github.com/mborgerding/kissfft/blob/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec/COPYING"
+    },
+    {
+      "group": "Native libraries",
+      "name": "kaldi-decoder",
+      "version": "0.3.0",
+      "license": "Apache-2.0",
+      "source": "https://github.com/k2-fsa/kaldi-decoder",
+      "files": [
+        "licenses/kaldi-decoder.txt"
+      ],
+      "ref": "https://github.com/k2-fsa/kaldi-decoder/blob/v0.3.0/LICENSE"
+    },
+    {
+      "group": "Native libraries",
+      "name": "kaldifst",
+      "version": "1.8.0",
+      "license": "Apache-2.0",
+      "source": "https://github.com/k2-fsa/kaldifst",
+      "files": [
+        "licenses/kaldifst.txt"
+      ],
+      "ref": "https://github.com/k2-fsa/kaldifst/blob/v1.8.0/LICENSE"
+    },
+    {
+      "group": "Native libraries",
+      "name": "OpenFst (k2-fsa fork)",
+      "version": "1.8.5-2026-07-09",
+      "license": "Apache-2.0",
+      "source": "https://github.com/csukuangfj/openfst",
+      "files": [
+        "licenses/openfst.txt"
+      ],
+      "ref": "https://github.com/csukuangfj/openfst/blob/v1.8.5-2026-07-09/COPYING"
+    },
+    {
+      "group": "Native libraries",
+      "name": "simple-sentencepiece",
+      "version": "0.7",
+      "license": "Apache-2.0",
+      "source": "https://github.com/pkufool/simple-sentencepiece",
+      "files": [
+        "licenses/simple-sentencepiece.txt"
+      ],
+      "ref": "https://github.com/pkufool/simple-sentencepiece/blob/v0.7/LICENSE"
+    },
+    {
+      "group": "Native libraries",
+      "name": "utf8proc",
+      "version": "2.12.0",
+      "license": "MIT AND Unicode-3.0",
+      "source": "https://github.com/JuliaStrings/utf8proc",
+      "files": [
+        "licenses/utf8proc.txt"
+      ],
+      "ref": "https://github.com/JuliaStrings/utf8proc/blob/v2.12.0/LICENSE.md"
+    },
+    {
+      "group": "Native libraries",
+      "name": "JSON for Modern C++",
+      "version": "3.12.0",
+      "license": "MIT",
+      "source": "https://github.com/nlohmann/json",
+      "files": [
+        "licenses/nlohmann-json.txt"
+      ],
+      "ref": "https://github.com/nlohmann/json/blob/v3.12.0/LICENSE.MIT"
+    },
+    {
+      "group": "Native libraries",
+      "name": "Eigen",
+      "version": "3.4.0",
+      "license": "MPL-2.0",
+      "source": "https://gitlab.com/libeigen/eigen",
+      "attribution": "Header-only, used unmodified through kaldi-decoder and ONNX Runtime. Its source code is available at the link above.",
+      "files": [
+        "licenses/eigen.txt"
+      ],
+      "ref": "https://gitlab.com/libeigen/eigen/-/blob/3.4.0/COPYING.MPL2"
+    },
+    {
+      "group": "Native libraries",
+      "name": "libopus",
+      "version": "1.6.1",
+      "license": "BSD-3-Clause",
+      "source": "https://opus-codec.org",
+      "attribution": "Built from source in crates/echonote-opus/opus.",
+      "files": [
+        "../crates/echonote-opus/opus/COPYING"
+      ],
+      "ref": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz"
+    },
+    {
+      "group": "Native libraries",
+      "name": "SQLite",
+      "version": "3.53.2",
+      "license": "blessing",
+      "source": "https://sqlite.org",
+      "attribution": "Built from the amalgamation bundled with libsqlite3-sys. SQLite is in the public domain.",
+      "files": []
+    },
+    {
+      "group": "Data",
+      "name": "OpenCC TSCharacters.txt",
+      "version": "ver.1.1.9",
+      "license": "Apache-2.0",
+      "source": "https://github.com/BYVoid/OpenCC",
+      "attribution": "crates/echonote-core/data/t2s.txt is derived from data/dictionary/TSCharacters.txt.",
+      "files": [
+        "licenses/opencc.txt"
+      ],
+      "ref": "https://github.com/BYVoid/OpenCC/blob/ver.1.1.9/LICENSE"
+    },
+    {
+      "group": "Frontend",
+      "name": "Svelte",
+      "npm": "svelte",
+      "license": "MIT",
+      "source": "https://github.com/sveltejs/svelte",
+      "files": [
+        "svelte/LICENSE.md"
+      ]
+    },
+    {
+      "group": "Frontend",
+      "name": "@tauri-apps/api",
+      "npm": "@tauri-apps/api",
+      "license": "Apache-2.0 OR MIT",
+      "source": "https://github.com/tauri-apps/tauri",
+      "files": [
+        "@tauri-apps/api/LICENSE-MIT",
+        "@tauri-apps/api/LICENSE-APACHE-2.0"
+      ]
+    },
+    {
+      "group": "Frontend",
+      "name": "Vite (module preload helper)",
+      "npm": "vite",
+      "license": "MIT",
+      "source": "https://github.com/vitejs/vite",
+      "files": [
+        "vite/LICENSE.md"
+      ],
+      "until": "# Licenses of bundled dependencies"
+    },
+    {
+      "group": "Windows installer",
+      "name": "Microsoft Edge WebView2 Runtime bootstrapper",
+      "version": "",
+      "license": "Microsoft Edge WebView2 Runtime terms",
+      "source": "https://developer.microsoft.com/microsoft-edge/webview2/",
+      "attribution": "The Windows installer embeds the bootstrapper, which installs the WebView2 Runtime when it is missing. The runtime is distributed by Microsoft under its own terms.",
+      "files": []
+    }
+  ],
+  "crate_licenses": [
+    {
+      "crates": [
+        "block2",
+        "dispatch2",
+        "objc2",
+        "objc2-app-kit",
+        "objc2-audio-toolbox",
+        "objc2-core-audio",
+        "objc2-core-audio-types",
+        "objc2-core-foundation",
+        "objc2-core-graphics",
+        "objc2-encode",
+        "objc2-exception-helper",
+        "objc2-foundation",
+        "objc2-io-surface",
+        "objc2-quartz-core",
+        "objc2-web-kit"
+      ],
+      "files": [
+        "licenses/crates/objc2-MIT.txt"
+      ],
+      "ref": "https://github.com/madsmtm/objc2/blob/8a5abacd90d5403fc0463459a35826f892b9142e/LICENSE-MIT.txt"
+    },
+    {
+      "crates": [
+        "alloc-stdlib"
+      ],
+      "files": [
+        "licenses/crates/alloc-no-stdlib-BSD-3-Clause.txt"
+      ],
+      "ref": "https://github.com/dropbox/rust-alloc-no-stdlib/blob/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE"
+    },
+    {
+      "crates": [
+        "audio-core"
+      ],
+      "files": [
+        "licenses/crates/audio-MIT.txt"
+      ],
+      "ref": "https://github.com/udoprog/audio/blob/52159d274cc80525acecbdaf70b81bab41d15652/LICENSE-MIT"
+    },
+    {
+      "crates": [
+        "dasp_sample"
+      ],
+      "files": [
+        "licenses/crates/dasp-MIT.txt"
+      ],
+      "ref": "https://github.com/rustaudio/sample/blob/d0892971a3b72dee9b3ff0d16f94b0962605e858/LICENSE-MIT"
+    },
+    {
+      "crates": [
+        "webview2-com",
+        "webview2-com-macros",
+        "webview2-com-sys"
+      ],
+      "files": [
+        "licenses/crates/webview2-rs-MIT.txt"
+      ],
+      "ref": "https://github.com/wravery/webview2-rs/blob/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE"
+    },
+    {
+      "crates": [
+        "tauri-plugin"
+      ],
+      "files": [
+        "licenses/crates/tauri-MIT.txt"
+      ],
+      "ref": "https://github.com/tauri-apps/tauri/blob/31f29e197e7ac18797dbb9270fe658c1ca1010c8/LICENSE-MIT"
+    },
+    {
+      "crates": [
+        "selectors"
+      ],
+      "files": [
+        "licenses/eigen.txt"
+      ],
+      "ref": "Mozilla Public License 2.0 text (the copy from Eigen); stylo has per-file MPL-2.0 headers and no license file. Source: https://github.com/servo/stylo"
+    }
+  ]
+}

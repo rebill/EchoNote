@@ -1,0 +1,159 @@
+name: Release
+
+# Builds the v1 installers after the Desktop checks pass. A tag push creates a draft GitHub
+# release with the installers and SHA256SUMS.txt; publishing the draft is a manual step.
+# A manual run builds and uploads workflow artifacts only.
+
+on:
+  push:
+    tags:
+      - "v1.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  SHERPA_ONNX_ARCHIVE_DIR: ${{ github.workspace }}/.sherpa-onnx
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/desktop.yml
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            installers: dmg/*.dmg
+          # Cross-compiled on Apple silicon; the x64 sherpa-onnx archive is linked statically.
+          - name: macOS x64
+            os: macos-14
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            installers: dmg/*.dmg
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            installers: nsis/*-setup.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(node -p "require('./app/package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, app/package.json $version"; exit 1; }
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Cache sherpa-onnx archive
+        uses: actions/cache@v4
+        with:
+          path: .sherpa-onnx
+          key: sherpa-onnx-2.0.1-${{ matrix.target }}
+
+      - name: Fetch sherpa-onnx archive
+        run: python scripts/dev/fetch_sherpa_onnx.py .sherpa-onnx ${{ matrix.target }}
+
+      - name: Cache bundled models
+        uses: actions/cache@v4
+        with:
+          path: app/src-tauri/resources/models
+          key: bundled-models-${{ hashFiles('crates/echonote-models/manifest.json') }}
+
+      # Every file is checked against the manifest SHA-256, cached or not.
+      - name: Stage bundled models
+        run: python scripts/dev/stage_bundle_models.py
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Third-party notices
+        run: python scripts/dev/gen_notices.py
+
+      - name: Build installers
+        working-directory: app
+        run: pnpm bundle --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Check bundle
+        run: python scripts/dev/check_bundle.py target/${{ matrix.target }}/release ${{ matrix.target }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/bundle/${{ matrix.installers }}
+          if-no-files-found: error
+
+  draft:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * | tee SHA256SUMS.txt
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft "${prerelease[@]}" \
+            --title "EchoNote $GITHUB_REF_NAME" \
+            --notes "Unsigned builds: see docs/V1_0_0_DESKTOP_APP_INSTALL.md for Gatekeeper and SmartScreen. Verify downloads against SHA256SUMS.txt."
