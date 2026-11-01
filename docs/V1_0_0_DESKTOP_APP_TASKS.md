@@ -157,12 +157,15 @@ Acceptance targets:
 
 ## M6 Packaging And Closure
 
-- [ ] macOS arm64 and x64 DMG; Windows x64 NSIS; default model and VAD bundled.
-- [ ] Self-signing instructions and Gatekeeper/SmartScreen guidance for unsigned builds.
-- [ ] CI release matrix with build, tests, and bench gates.
-- [ ] NOTICE with model and dependency licenses.
-- [ ] README, CHANGELOG, privacy and troubleshooting docs for v1.
-- [ ] Propose removal of `plugin/`, `companion/`, `asr-service/`, `vscode-extension/`; remove only after approval.
+- [x] macOS arm64 and x64 DMG with the default model and VAD bundled (`scripts/dev/stage_bundle_models.py`, `tauri.bundle.conf.json`; DMG 163.4 and 164.7 MiB; release builds launched with an empty HOME find both models).
+- [ ] Windows x64 NSIS: configured and built by `release.yml`, not yet built or installed on Windows. Needs a push and a Windows machine.
+- [x] Self-signing instructions and Gatekeeper/SmartScreen guidance for unsigned builds (`docs/V1_0_0_DESKTOP_APP_INSTALL.md`).
+- [x] CI release matrix with build, tests, and bench gates (`.github/workflows/release.yml` calls `desktop.yml`, then builds three targets and runs `scripts/dev/check_bundle.py`; tags create a draft release; actionlint clean).
+- [ ] First run of the release workflow on GitHub. Needs a push, which waits for the user.
+- [x] NOTICE with model and dependency licenses (`NOTICE`; `scripts/dev/gen_notices.py` writes `THIRD_PARTY_NOTICES.txt` into the installers from `third_party/notices.json` and 399 Rust crates).
+- [x] README, CHANGELOG, privacy and troubleshooting docs for v1 (`docs/V1_0_0_DESKTOP_APP_PRIVACY.md`, `_TROUBLESHOOTING.md`, `_RELEASE.md`).
+- [x] Propose removal of `plugin/`, `companion/`, `asr-service/`, `vscode-extension/` (`docs/V1_0_0_LEGACY_REMOVAL_PROPOSAL.md`).
+- [ ] Remove the legacy directories. Waits for the user's approval and for v1.0.0.
 
 Acceptance targets:
 

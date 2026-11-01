@@ -354,6 +354,16 @@ M1 实现：`echonote-bench gate` 有 3 个合成夹具（3 分钟双方轮流�
 - Windows 用 NSIS，静态 CRT（`.cargo/config.toml` 已设置 `+crt-static`），不需要 VC++ 运行库，带 WebView2 引导程序。没有签名，SmartScreen 会提示。
 - 目前测得的二进制大小（bench，含 sherpa 和 onnxruntime）：arm64 19.3 MB，x64 22.6 MB。
 
+M6 实现：
+
+- 默认模型和 VAD 不进 git。`scripts/dev/stage_bundle_models.py` 按 `crates/echonote-models/manifest.json` 把 SenseVoice 的 `model.int8.onnx`、`tokens.txt` 和 `silero_vad.onnx` 从本机开发数据复制过来，没有就从清单里的镜像下载，逐个校验 SHA-256，放到 `app/src-tauri/resources/models/`（已忽略），多余的文件删掉。`app/src-tauri/tauri.bundle.conf.json` 把它映射到 `$RESOURCE/models/`，正是 `models::roots` 查找的位置；只有 `pnpm bundle`（`tauri build --config tauri.bundle.conf.json`）合并这个配置，普通的 `cargo build` 和 `tauri dev` 不需要这些文件。
+- `scripts/dev/gen_notices.py` 生成 `THIRD_PARTY_NOTICES.txt`，和 `License` 一起打进安装包。来源两部分：`third_party/notices.json` 手工列出模型、sherpa-onnx 静态库里的原生库（onnxruntime 及其自带的第三方声明、kaldi-native-fbank、KISS FFT、kaldi-decoder、kaldifst、OpenFst、simple-sentencepiece、utf8proc、nlohmann/json、Eigen）、libopus、SQLite、OpenCC 数据和前端运行时，许可证原文按固定版本取自上游仓库，放在 `third_party/licenses/`；Rust crate 用 `cargo metadata` 按 macOS 和 Windows 三个目标取 `echonote-app` 的普通依赖和构建依赖（399 个），读各自的许可证文件。23 个 crate 没有带许可证文件，原文同样取自上游，记在 `crate_licenses`；以后新增这样的 crate，生成会报错。相同的原文只印一次。查过最终二进制的符号，sherpa-onnx 的 TTS 部分（espeak-ng、piper，GPL）没有链接进来。
+- `scripts/dev/check_bundle.py` 检查应用里的模型大小、声明文件和安装包大小（`app.installerMiB`）。
+- 本机结果（macOS 26.2 SDK，`minos 14.2`）：arm64 DMG 163.4 MiB、应用 254 MiB；x64（在 Apple 芯片上交叉编译）DMG 164.7 MiB、应用 256.7 MiB。用空的 HOME 启动发布版，日志是 `models: asr true, vad true`，空闲 RSS arm64 70 MB、x64（Rosetta）57 MB。签名 `adhoc,runtime`，只有 `audio-input` 一项 entitlement，`codesign --verify --deep --strict` 通过。NSIS 安装包要在 Windows 上构建，还没有测。
+- `.github/workflows/release.yml`：调用 `desktop.yml` 做全部检查，再按矩阵构建 macOS arm64、macOS x64、Windows x64，跑 `check_bundle.py`；推送 `v1.*` 标签时建草稿 Release，附 `SHA256SUMS.txt`。工作流还没有在 GitHub 上跑过。
+- WebView2 用引导程序。离线安装包要多带一百多 MB 的运行时，会超出 300 MB 预算。Windows 11 和已更新的 Windows 10 自带 WebView2；没有的电脑离线安装前要先装运行时，写在安装说明里。
+- 用户文档：`docs/V1_0_0_DESKTOP_APP_INSTALL.md`（Gatekeeper、SmartScreen、自签名）、`_PRIVACY.md`、`_TROUBLESHOOTING.md`、`_RELEASE.md`；旧产品移除提案在 `docs/V1_0_0_LEGACY_REMOVAL_PROPOSAL.md`。
+
 ## 14. M0 验证结果
 
 | Spike | 结果 | 未完成 |
@@ -418,6 +428,10 @@ M1 实现：`echonote-bench gate` 有 3 个合成夹具（3 分钟双方轮流�
 | 17 | 高精度重转只在原来的段落边界内解码，不重新分段 | 修订、问答引用、纠错都按段落 id 记录；重新分段会让它们失效。代价是实时分段切错的地方重转也改不了 |
 | 18 | 模型先按文件从镜像下载，发布包只做最后的退路 | 文件可以逐个续传和校验；发布包要整包下完才能解压，还要多占一份磁盘 |
 | 19 | 重转用单独的 `retranscriptions` 表，整场撤销 | 和 LLM 纠错不同，重转改动多、逐条确认不现实；撤销需要同时恢复文字和模型名 |
+| 20 | 打包用的模型在发布构建时暂存，不进 git；用单独的打包配置合并资源 | 模型 238 MB；开发构建不受影响；暂存时按清单校验，和模型管理器用同一份清单 |
+| 21 | 第三方声明在构建时生成，不提交生成结果 | 依赖一变就要更新，约 1.1 MB；提交的是输入（`notices.json` 和许可证原文），缺许可证会让生成失败 |
+| 22 | Windows 用 WebView2 引导程序，不用离线安装包 | 离线安装包会超出 300 MB 预算；多数 Windows 10/11 已自带 WebView2 |
+| 23 | 发布工作流只建草稿 Release | 没有签名证书；默认模型的 FunASR 许可证要在公开发布前确认 |
 
 ## 17. 风险
 
@@ -434,6 +448,8 @@ M1 实现：`echonote-bench gate` 有 3 个合成夹具（3 分钟双方轮流�
 | 合成集上麦克风轨错误率偏高 | 用户自己的话识别变差 | M1 前查清原因 |
 | 用户真实会议录音还没有 | 评测集代表性不足 | 用户提供 3–5 段后补测 |
 | Qwen3-ASR 在 4 核机器上的重转速度没有测过 | 1 小时会议的重转可能超过 1 小时 | 空闲时段跑 M0 矩阵里的 Qwen3 项，按结果调线程数，必要时在界面上给出预计时间 |
+| Windows 安装包和发布工作流还没有实际跑过 | NSIS 打包、资源路径或版本号在 Windows 上出错 | 推送后先手动运行 release 工作流，在 Windows 机器上断网安装验证 |
+| 没有 WebView2 的 Windows 离线安装失败 | 验收要求的“断网安装”在这类电脑上不成立 | 安装说明写明先装运行时；需要时改用 `offlineInstaller` 并重新核算预算 |
 
 ## 18. 架构评审
 

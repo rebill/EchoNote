@@ -4,6 +4,26 @@ All notable changes to EchoNote are documented in this file.
 
 This project follows semantic versioning for release tags.
 
+## [1.0.0-alpha.0] - Unreleased
+
+EchoNote v1 is a standalone desktop app (`app/`, `crates/`) for macOS 14.2+ (arm64, x64) and Windows 10/11 x64. It replaces the Obsidian plugin, Companion and the Python ASR service, which stay frozen in the repository until their removal is approved.
+
+### Added
+
+- Two-track recording: the microphone as "我" and system audio as "对方" (macOS Process Tap; WASAPI process loopback on Windows 11, endpoint loopback on Windows 10). Recordings are Ogg/Opus files written page by page, repaired and transcribed again after a crash.
+- Local transcription on the CPU with sherpa-onnx, linked statically: SenseVoice for live text with previews and finals, Silero VAD, and an EchoNote segmenter with a 12 s hard cap. Duplicates of the other side picked up by the microphone are hidden.
+- A SQLite meeting library with full-text search, segment editing with revisions, a glossary (display replacements, ASR hotwords, LLM prompts), playback with click-to-seek, and Markdown and TXT export.
+- AI features with any OpenAI-compatible or Anthropic provider: summaries from templates, Q&A with timestamp citations, LLM transcript correction reviewed per segment, and opt-in live highlights. Keys stay in the system keychain; a transcript goes to a remote server only after the user confirms that server.
+- A model manager that downloads the high-accuracy Qwen3-ASR model with resume and SHA-256 checks, and re-transcribes a saved meeting within its segments, with undo.
+- Tray or menu bar icon, a global shortcut, auto-stop after silence, and zh-CN and en UI.
+- DMG and NSIS installers with the default model, the VAD and THIRD_PARTY_NOTICES.txt bundled; a release workflow that builds them after the desktop checks pass.
+- v1 user docs: `docs/V1_0_0_DESKTOP_APP_INSTALL.md`, `docs/V1_0_0_DESKTOP_APP_PRIVACY.md` and `docs/V1_0_0_DESKTOP_APP_TROUBLESHOOTING.md`.
+
+### Known limitations
+
+- Builds are not notarized or code-signed; Gatekeeper and SmartScreen ask on first launch.
+- Windows capture, the Windows installer, macOS 14.2–14.3 and the 3-hour soak have not run on real hardware yet (see `docs/V1_0_0_DESKTOP_APP_TASKS.md`).
+
 ## [0.9.0] - 2026-07-16
 
 ### Added

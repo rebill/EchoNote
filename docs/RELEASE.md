@@ -2,6 +2,8 @@
 
 This checklist publishes an EchoNote release from a clean `main` branch.
 
+It covers the Obsidian plugin, Companion and the ASR service. The v1 desktop app has its own process: `docs/V1_0_0_DESKTOP_APP_RELEASE.md`.
+
 ## 1. Prepare
 
 Confirm the version is consistent in:

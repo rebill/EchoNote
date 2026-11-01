@@ -17,3 +17,5 @@ __pycache__/
 
 # Installer inputs written by scripts/dev/stage_bundle_models.py and gen_notices.py
 app/src-tauri/resources/
+# Local signing overrides (docs/V1_0_0_DESKTOP_APP_INSTALL.md)
+app/src-tauri/tauri.sign.conf.json
