@@ -300,6 +300,9 @@ pub struct Engine {
     /// A meeting is being transcribed again; `interrupt` stops it for a recording.
     retranscribing: AtomicBool,
     interrupt: AtomicBool,
+    /// The running pass's worker client cancels its queued work when this is set, so a
+    /// recording's model load does not wait behind the pass's.
+    pass_cancel: Mutex<Option<Arc<AtomicBool>>>,
     /// Recovery finished at least once: a meeting still marked `recording` that is not the
     /// live one could not be recovered and may be deleted.
     recovered: AtomicBool,
@@ -358,6 +361,7 @@ impl Engine {
                 recovering: AtomicBool::new(false),
                 retranscribing: AtomicBool::new(false),
                 interrupt: AtomicBool::new(false),
+                pass_cancel: Mutex::new(None),
                 recovered: AtomicBool::new(false),
             },
             received,
@@ -391,8 +395,6 @@ impl Engine {
             }
             handle.join();
         }
-        // Recording comes first: a pass of the high-accuracy model stops.
-        self.interrupt.store(true, Ordering::Release);
         let handle = session::spawn(
             self.config.clone(),
             self.store.clone(),
@@ -400,6 +402,12 @@ impl Engine {
             self.events.clone(),
             options,
         )?;
+        // Recording comes first: a pass of the high-accuracy model stops, and its queued
+        // work is dropped. A start that failed leaves the pass alone.
+        self.interrupt.store(true, Ordering::Release);
+        if let Some(cancel) = self.pass_cancel.lock().ok().and_then(|pass| pass.clone()) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         let meeting = handle.meeting;
         *active = Some(handle);
         Ok(meeting)
@@ -458,7 +466,7 @@ impl Engine {
         stop: &dyn Fn() -> bool,
         on_progress: &mut dyn FnMut(Retranscription),
     ) -> Result<Retranscription, EngineError> {
-        {
+        let cancel = {
             let active = self.active.lock().map_err(|_| EngineError::Stopped)?;
             if active.as_ref().is_some_and(|handle| !handle.finished()) {
                 return Err(EngineError::Busy);
@@ -470,17 +478,25 @@ impl Engine {
                 return Err(EngineError::Retranscribing);
             }
             self.interrupt.store(false, Ordering::Release);
-        }
+            // Published under the session lock: a start either sees it or came first.
+            let cancel = Arc::new(AtomicBool::new(false));
+            if let Ok(mut pass) = self.pass_cancel.lock() {
+                *pass = Some(cancel.clone());
+            }
+            cancel
+        };
         let interrupted = || self.interrupt.load(Ordering::Acquire);
         let result = retranscribe::run(
-            &self.config,
-            &self.store,
-            &self.worker,
+            self,
             meeting,
             model,
+            cancel,
             &|| stop() || interrupted(),
             on_progress,
         );
+        if let Ok(mut pass) = self.pass_cancel.lock() {
+            *pass = None;
+        }
         self.retranscribing.store(false, Ordering::Release);
         match result {
             Err(EngineError::Cancelled) if interrupted() => Err(EngineError::Busy),

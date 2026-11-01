@@ -91,6 +91,17 @@ impl Store {
         Ok(count as usize)
     }
 
+    /// Segments of `meeting` whose current revision is a pass's result. Any later change
+    /// (an edit, a restored revision) makes a segment due for the next pass again.
+    pub fn retranscribed_segments(&self, meeting: i64) -> Result<Vec<i64>, StoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT r.segment_id FROM retranscriptions r JOIN segments s ON s.id = r.segment_id
+             WHERE r.meeting_id = ?1 AND s.revision = r.revision",
+        )?;
+        let rows = statement.query_map([meeting], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Undo every pass on `meeting`: each segment gets back the text and model it had
     /// before the first pass, as a new revision. Segments the user changed since keep
     /// their text. Returns how many were restored.

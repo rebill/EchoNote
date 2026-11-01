@@ -847,3 +847,65 @@ fn a_model_that_fails_to_load_changes_nothing() {
     );
     assert_eq!(by_model(&engine, meeting, "fake"), 4);
 }
+
+#[test]
+fn a_start_that_fails_does_not_stop_a_pass() {
+    let dir = TempDir::new();
+    let (engine, events) = Engine::open(config(&dir, FakeModel::default())).unwrap();
+    let meeting = recorded(&engine, &events);
+    let slow = accurate("slow", 0.5);
+    let progressed = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let pass = scope.spawn(|| {
+            engine.retranscribe(meeting, &slow, &|| false, &mut |progress| {
+                if progress.done > 0 {
+                    progressed.store(true, Ordering::Release);
+                }
+            })
+        });
+        while !progressed.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let denied: OpenSource = Box::new(|| Err(CaptureError::Denied));
+        assert!(matches!(
+            engine.start(options(Some(denied), None)),
+            Err(EngineError::Capture(_))
+        ));
+        let done = pass.join().unwrap().unwrap();
+        assert_eq!((done.done, done.total), (4, 4));
+    });
+    assert_eq!(by_model(&engine, meeting, "slow"), 4);
+}
+
+#[test]
+fn a_restored_text_is_transcribed_again_by_the_next_pass() {
+    let dir = TempDir::new();
+    let (engine, events) = Engine::open(config(&dir, FakeModel::default())).unwrap();
+    let meeting = recorded(&engine, &events);
+    let model = accurate("accurate", 0.0);
+    let first = engine
+        .retranscribe(meeting, &model, &|| false, &mut |_| {})
+        .unwrap();
+    assert_eq!(first.total, 4);
+    // Back to the live model's text: the segment still says `accurate`, but is due again.
+    let before = segments(&engine.store().reader().unwrap(), meeting);
+    let restored = before[0].id;
+    engine
+        .store()
+        .call(move |store| store.restore_revision(restored, 1))
+        .unwrap();
+    let live = engine.store().reader().unwrap().segment(restored).unwrap();
+    assert!(live.text.chars().any(char::is_lowercase), "{live:?}");
+    assert_eq!(live.model, "accurate");
+    let again = engine
+        .retranscribe(meeting, &model, &|| false, &mut |_| {})
+        .unwrap();
+    assert_eq!((again.done, again.total, again.changed), (1, 1, 1));
+    let after = engine.store().reader().unwrap().segment(restored).unwrap();
+    assert_eq!(after.text, before[0].text);
+    // Nothing else is left.
+    let rest = engine
+        .retranscribe(meeting, &model, &|| false, &mut |_| {})
+        .unwrap();
+    assert_eq!(rest.total, 0);
+}

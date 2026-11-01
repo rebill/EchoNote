@@ -2,14 +2,18 @@
 //! decoded within its own boundaries from the recording, so revisions, Q&A citations and
 //! corrections keep pointing at the same segments. Segments whose text is not the
 //! recognizer's (edited, LLM-corrected) and crosstalk segments are left alone; segments the
-//! model already transcribed are skipped, so a stopped pass continues where it ended.
+//! model already transcribed (and nobody changed since) are skipped, so a stopped pass
+//! continues where it ended.
 
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use super::decoder::Model;
-use super::worker::{Spill, Worker, WorkerEvent};
-use super::{EngineConfig, EngineError, StoreHandle};
+use super::worker::{Spill, WorkerEvent};
+use super::{Engine, EngineError};
 use crate::pipeline::{Cut, Job, JobKind};
 use crate::store::{MeetingStatus, Retranscribed, Source};
 use crate::text::{sanitize, strip_tags};
@@ -38,15 +42,21 @@ fn samples(ms: i64) -> usize {
     (ms.max(0) as u64 * u64::from(crate::SAMPLE_RATE) / 1_000) as usize
 }
 
+/// `cancel` drops the pass's queued worker work (see `Engine::start`).
 pub(super) fn run(
-    config: &EngineConfig,
-    store: &StoreHandle,
-    worker: &Worker,
+    engine: &Engine,
     meeting: i64,
     model: &Model,
+    cancel: Arc<AtomicBool>,
     stop: &dyn Fn() -> bool,
     on_progress: &mut dyn FnMut(Retranscription),
 ) -> Result<Retranscription, EngineError> {
+    let Engine {
+        config,
+        store,
+        worker,
+        ..
+    } = engine;
     let reader = store.reader()?;
     if reader.meeting(meeting)?.status == MeetingStatus::Recording {
         return Err(EngineError::InUse);
@@ -62,13 +72,18 @@ pub(super) fn run(
         })
         .collect();
     let name = model.name();
+    // `segments.model` alone is not enough: restoring an older text keeps the label.
+    let done: HashSet<i64> = reader
+        .retranscribed_segments(meeting)?
+        .into_iter()
+        .collect();
     let mut todo: std::collections::VecDeque<_> = reader
         .segments(meeting)?
         .into_iter()
         .filter(|segment| {
             segment.source == Source::Asr
                 && segment.crosstalk.is_none()
-                && segment.model != name
+                && !(segment.model == name && done.contains(&segment.id))
                 && segment.end_ms > segment.start_ms
         })
         .filter_map(|segment| {
@@ -87,9 +102,11 @@ pub(super) fn run(
         return Ok(progress);
     }
     let (inbox, received) = mpsc::channel();
-    let client = worker.client(model.clone(), true, move |event| {
-        let _ = inbox.send(event);
-    });
+    let client = worker
+        .client(model.clone(), true, move |event| {
+            let _ = inbox.send(event);
+        })
+        .cancelled_by(cancel);
     // Answers Loaded or LoadFailed even after an earlier failure.
     client.load();
     let mut sent = std::collections::VecDeque::new();

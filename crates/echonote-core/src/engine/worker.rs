@@ -55,6 +55,7 @@ enum Message {
     Load {
         model: Model,
         reply: Reply,
+        cancel: Arc<AtomicBool>,
     },
     Hold(bool),
     /// Free this model now if nobody holds it (the high-accuracy model after a pass).
@@ -130,7 +131,15 @@ impl Client {
         let _ = self.tx.send(Message::Load {
             model: self.model.clone(),
             reply: self.reply.clone(),
+            cancel: self.cancel.clone(),
         });
+    }
+
+    /// Drop this client's queued work once `cancel` is set (it is also set on drop), so
+    /// another client's work need not wait behind it. A decode in progress finishes.
+    pub fn cancelled_by(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     /// Queue a job; a spilled job is read back from `spill` first.
@@ -197,7 +206,14 @@ fn run(rx: mpsc::Receiver<Message>, idle_unload: Duration, shown: Arc<Mutex<Opti
                     set_shown(None);
                 }
             }
-            Message::Load { model, reply } => {
+            Message::Load {
+                model,
+                reply,
+                cancel,
+            } => {
+                if cancel.load(Ordering::Relaxed) {
+                    continue;
+                }
                 failed = None;
                 ensure(&mut loaded, &mut failed, &model, &reply, true, &set_shown);
             }

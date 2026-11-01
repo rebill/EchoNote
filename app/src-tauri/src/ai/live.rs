@@ -28,9 +28,17 @@ fn policy() -> Policy {
     }
 }
 
+/// One recording. Deleting the newest meeting frees its id for the next one, so the start
+/// time tells two recordings with the same id apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Key {
+    meeting: i64,
+    started_at_ms: i64,
+}
+
 /// The recording being followed.
 struct Round {
-    meeting: i64,
+    key: Key,
     bullets: String,
     /// Highest segment id already sent.
     last_segment: i64,
@@ -67,9 +75,16 @@ fn run(app: &AppHandle) {
             }
             continue;
         };
-        if round.as_ref().is_none_or(|round| round.meeting != meeting) {
+        let Ok(row) = state.read(|store| store.meeting(meeting)) else {
+            continue;
+        };
+        let key = Key {
+            meeting,
+            started_at_ms: row.started_at_ms,
+        };
+        if is_new(round.as_ref(), key) {
             round = Some(Round {
-                meeting,
+                key,
                 bullets: String::new(),
                 last_segment: 0,
                 last_run: Instant::now(),
@@ -105,6 +120,11 @@ fn run(app: &AppHandle) {
     }
 }
 
+/// Whether `key` is another recording than the one `round` follows.
+fn is_new(round: Option<&Round>, key: Key) -> bool {
+    round.is_none_or(|round| round.key != key)
+}
+
 /// One round; `None` when nothing new was said.
 async fn update(state: &AppState, round: &mut Round) -> CommandResult<Option<SummaryView>> {
     let provider = state.ai().active()?.clone();
@@ -115,7 +135,7 @@ async fn update(state: &AppState, round: &mut Round) -> CommandResult<Option<Sum
             client
         }
     };
-    let (lines, terms) = jobs::transcript(state, round.meeting)?;
+    let (lines, terms) = jobs::transcript(state, round.key.meeting)?;
     let newest = lines.iter().map(|line| line.segment).max().unwrap_or(0);
     let new_lines: Vec<_> = lines
         .into_iter()
@@ -139,7 +159,7 @@ async fn update(state: &AppState, round: &mut Round) -> CommandResult<Option<Sum
     round.bullets = bullets.clone();
     round.last_segment = newest;
     let label = provider.label();
-    let meeting = round.meeting;
+    let meeting = round.key.meeting;
     round.client = Some((provider, client));
     let row = state.engine()?.store().call(move |store| {
         store.save_summary(
@@ -167,4 +187,36 @@ pub async fn get_highlights(
     Ok(state
         .read(|store| store.latest_summary(meeting, SummaryKind::Highlights))?
         .map(SummaryView::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round(meeting: i64, started_at_ms: i64) -> Round {
+        Round {
+            key: Key {
+                meeting,
+                started_at_ms,
+            },
+            bullets: "- old".into(),
+            last_segment: 7,
+            last_run: Instant::now(),
+            client: None,
+        }
+    }
+
+    #[test]
+    fn a_reused_meeting_id_starts_a_new_round() {
+        let key = |meeting, started_at_ms| Key {
+            meeting,
+            started_at_ms,
+        };
+        assert!(is_new(None, key(3, 1_000)));
+        let current = round(3, 1_000);
+        assert!(!is_new(Some(&current), key(3, 1_000)));
+        // Meeting 3 was deleted and its id given to the next recording.
+        assert!(is_new(Some(&current), key(3, 2_000)));
+        assert!(is_new(Some(&current), key(4, 1_000)));
+    }
 }
