@@ -2,7 +2,9 @@
 
 use echonote_core::engine::SessionState;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+#[cfg(target_os = "macos")]
+use tauri::menu::Submenu;
+use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Wry};
 
@@ -185,6 +187,7 @@ pub fn on_menu(app: &AppHandle, event: MenuEvent) {
 
 /// The macOS app menu: Quit goes through `quit` so a recording is finished first, and Edit
 /// keeps copy and paste working in text fields.
+#[cfg(target_os = "macos")]
 pub fn app_menu(app: &AppHandle, language: &str) -> tauri::Result<Menu<Wry>> {
     let quit = MenuItem::with_id(
         app,
