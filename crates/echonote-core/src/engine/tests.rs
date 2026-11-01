@@ -326,13 +326,20 @@ fn pause_leaves_the_paused_time_out_and_ends_the_utterance() {
                 as Box<dyn AudioSource>,
         )
     });
+    // Runners oversleep, so the expected lengths come from the clock, not the sleeps.
+    let started = Instant::now();
     let meeting = engine.start(options(Some(mic), None)).unwrap();
     std::thread::sleep(Duration::from_millis(1_000));
+    let paused = Instant::now();
     engine.pause().unwrap();
     std::thread::sleep(Duration::from_millis(1_000));
+    let resumed = Instant::now();
     engine.resume().unwrap();
     std::thread::sleep(Duration::from_millis(1_000));
+    let stopped = Instant::now();
     engine.stop().unwrap();
+    let before_ms = (paused - started).as_millis() as i64;
+    let after_ms = (stopped - resumed).as_millis() as i64;
     let seen = until_finished(&events, Duration::from_secs(10));
     let states: Vec<_> = seen
         .iter()
@@ -353,13 +360,17 @@ fn pause_leaves_the_paused_time_out_and_ends_the_utterance() {
     );
     let reader = engine.store().reader().unwrap();
     let duration = reader.tracks(meeting).unwrap()[0].duration_ms.unwrap();
-    // 1 s + 0.6 s padding + 1 s; the paused second is not recorded.
-    assert!((duration - 2_600).abs() <= 200, "{duration}");
-    // The utterance before the pause ended inside the padding (pause at about 1.0 s); the
-    // tone after resume is another one, starting 0.2 s after the padding.
+    // About 1 s + 0.6 s padding + 1 s; the paused second is not recorded.
+    let expected = before_ms + 600 + after_ms;
+    assert!(
+        (duration - expected).abs() <= 250,
+        "{duration} vs {expected}"
+    );
+    // The utterance before the pause ended inside the padding; the tone after resume is
+    // another one, starting 0.2 s after the padding.
     let found = segments(&reader, meeting);
     assert_eq!(found.len(), 2, "{found:#?}");
-    assert!(found[0].end_ms <= 1_500, "{found:#?}");
+    assert!(found[0].end_ms <= before_ms + 500, "{before_ms} {found:#?}");
     assert!(found[1].start_ms >= found[0].end_ms + 300, "{found:#?}");
 }
 

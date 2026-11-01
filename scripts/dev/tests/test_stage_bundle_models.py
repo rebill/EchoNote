@@ -90,7 +90,7 @@ class StageBundleModelsTest(unittest.TestCase):
         write(self.source, {"live/model.onnx": LIVE, "live/tokens.txt": TOKENS, "vad/vad.onnx": VAD})
         write(self.out, {"old-model/model.onnx": b"old", "live/extra.txt": b"x", "vad/vad.onnx.part": b"x"})
         stager.stage(manifest(), self.source, self.out, None)
-        files = sorted(str(path.relative_to(self.out)) for path in self.out.rglob("*") if path.is_file())
+        files = sorted(path.relative_to(self.out).as_posix() for path in self.out.rglob("*") if path.is_file())
         self.assertEqual(files, ["live/model.onnx", "live/tokens.txt", "vad/vad.onnx"])
         self.assertFalse((self.out / "old-model").exists())
 
