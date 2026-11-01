@@ -15,6 +15,8 @@ __pycache__/
 
 .DS_Store
 
+# sherpa-onnx archives fetched by scripts/dev/fetch_sherpa_onnx.py (CI and the release doc use .sherpa-onnx)
+.sherpa-onnx/
 # Installer inputs written by scripts/dev/stage_bundle_models.py and gen_notices.py
 app/src-tauri/resources/
 # Local signing overrides (docs/V1_0_0_DESKTOP_APP_INSTALL.md)

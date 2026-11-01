@@ -1,254 +1,169 @@
 # EchoNote
 
-EchoNote is an Obsidian desktop plugin for offline meeting transcription and optional AI meeting summaries.
+EchoNote is a desktop app for meeting transcription. It records your microphone and the system audio as two tracks, transcribes them on your computer, keeps the meetings in a local library, and can summarize them with an LLM provider you configure.
 
-MVP scope:
+Status: `1.0.0-alpha.0`. The installers are unsigned: macOS builds are ad-hoc signed and not notarized, and Windows builds are not signed. Windows capture, the Windows installer, macOS 14.2 to 14.3 and the 3-hour soak test have not run on real hardware yet (see the known limitations in [CHANGELOG.md](CHANGELOG.md)). This README covers the v1 desktop app. The earlier Obsidian plugin is described under [Legacy code](#legacy-code).
 
-- macOS only.
-- Local ASR with MLX.
-- macOS EchoNote desktop app to start, stop, monitor, and diagnose the local ASR service.
-- Quasi-real-time chunk transcription.
-- Silence-aware live chunking to reduce sentence cuts.
-- Optional local anonymous speaker labels in final transcripts.
-- Optional conservative LLM transcript correction with before-correction artifacts.
-- Markdown meeting notes in your Obsidian vault.
-- OpenAI-compatible and Anthropic summary providers.
-- Optional virtual audio input support through BlackHole or Loopback.
+## Features
 
-## Repository Layout
+- Two tracks recorded at once, with no virtual audio device. The microphone is labeled "我" (me) and the system audio "对方" (the other side). System audio comes from a Core Audio process tap on macOS and WASAPI loopback on Windows.
+- Live transcription on the CPU with sherpa-onnx. The default model (SenseVoice-Small int8) and the voice activity detector (Silero VAD) ship in the installer, so recording and transcription work offline.
+- A meeting library in SQLite: substring search (including Chinese), rename, delete, playback from any transcript line, per-line edits with revert, and a glossary.
+- Export to Markdown or plain text. Markdown is an export format only; the SQLite library is the store.
+- AI features: summaries from built-in or custom templates, Q&A with timestamp links, transcript correction, and optional live highlights while recording. They work with any OpenAI-compatible endpoint (presets include OpenAI, DeepSeek, Qwen, Kimi, Zhipu GLM, Ollama and LM Studio) or the Anthropic Messages API. API keys are stored in the macOS Keychain or the Windows Credential Manager.
+- An optional high-accuracy model, Qwen3-ASR 0.6B int8 (about 990 MB), downloaded from Settings on request. It re-transcribes a saved meeting, and the previous version can be restored.
+- UI in Simplified Chinese (default) and English.
 
-```text
-plugin/       Obsidian TypeScript plugin
-asr-service/  Local Python ASR service
-companion/    Tauri desktop app for ASR runtime management
-docs/         PRD, technical design, test plans, and user guides
-```
+## Install
 
-## Requirements
+| Platform | Installer |
+| --- | --- |
+| macOS 14.2 or later, Apple silicon | `aarch64` DMG |
+| macOS 14.2 or later, Intel | `x64` DMG |
+| Windows 10 or 11, x64 | NSIS `*-setup.exe`, installed per user without administrator rights |
 
-- macOS.
-- Obsidian Desktop.
-- Node.js for building the plugin.
-- Python 3.11+.
-- Apple Silicon Mac recommended for MLX.
-- Rust and Tauri prerequisites if building Companion from source.
-- Optional: BlackHole or Loopback if you want to record meeting software output.
-
-## Offline Runtime and Installation
-
-EchoNote v0.9.0 runs ASR and speaker diarization from local model directories and installs Python dependencies only from a verified offline wheelhouse. A Hugging Face token is not used at runtime or during installation.
-
-Python 3.11+ is still a prerequisite. Build the portable bundle once on an authorized connected Mac, then move the resulting directory to the offline Mac:
-
-```bash
-python3 scripts/build_offline_bundle.py \
-  --output offline-bundle \
-  --wheelhouse /path/to/wheelhouse \
-  --requirements /path/to/requirements-offline.txt \
-  --asr-model qwen3-0.6b-4bit=/path/to/Qwen3-ASR-0.6B-4bit \
-  --diarization-model /path/to/speaker-diarization-community-1
-```
-
-The bundle contains a platform/Python contract and SHA-256 for every wheel, requirement file, and model file. Companion verifies the complete manifest before mutation, installs dependencies with `pip --no-index --find-links`, and atomically activates model directories with rollback.
-
-Set `Offline bundle path` in Companion, then click `Set Up EchoNote`. See [Offline installation](docs/V0_9_0_OFFLINE_INSTALLATION.md) for bundle creation, transfer, validation, and limitations.
-
-To start the service manually, pass absolute local model paths:
-
-```bash
-source asr-service/.venv/bin/activate
-
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m echonote_asr \
-  --host 127.0.0.1 \
-  --port 8765 \
-  --model "/absolute/path/to/Qwen3-ASR-0.6B-4bit" \
-  --backend mlx-audio \
-  --log-level info
-```
-
-Check service health:
-
-```bash
-curl http://127.0.0.1:8765/health
-```
-
-## ASR Runtime
-
-EchoNote uses the EchoNote desktop app as the only ASR backend for the Obsidian plugin. The plugin reads desktop discovery and calls the EchoNote-managed localhost ASR API; it no longer starts its own Python ASR process.
-
-If discovery is missing, stale, invalid, or unhealthy, EchoNote shows an explicit desktop runtime error.
-
-## Run With EchoNote Desktop
-
-EchoNote desktop is a macOS Tauri app that manages the Python ASR service and verified offline bundle. Python itself is not bundled in v0.9.0.
-
-Expected workflow:
-
-1. Build and run EchoNote desktop from source:
-
-```bash
-cd companion
-npm install
-npm run tauri:dev
-```
-
-2. Open EchoNote.
-3. Click `Set Up EchoNote`.
-4. Set the offline bundle path if it is not at `~/Library/Application Support/EchoNote/offline-bundle`.
-5. Wait for setup to verify hashes, prepare `asr-service/.venv`, install from the wheelhouse, atomically install models, and start the local service.
-6. Use `Advanced Settings` only for custom Python paths, ports, or local model paths.
-7. Confirm EchoNote shows `Service: Running` and writes discovery to:
-
-```text
-~/Library/Application Support/EchoNote/companion.json
-```
-
-Then in Obsidian, open EchoNote Status and confirm Companion status is `available`.
-
-For the release smoke path, run:
-
-```bash
-node scripts/v0_2_0_fake_backend_smoke.mjs
-```
-
-This validates the setup API fallback contract, starts the fake backend, writes a temporary discovery file, verifies the plugin resolves the desktop runtime, and verifies legacy Manual settings migrate away from plugin-managed ASR.
-
-## Build Obsidian Plugin
-
-```bash
-cd plugin
-npm install
-npm run build
-```
-
-The build creates:
-
-```text
-plugin/main.js
-plugin/manifest.json
-plugin/styles.css
-```
-
-## Performance Verification
-
-EchoNote v0.8.1 adds Qwen3 language prompting, background model preload with bounded warm-up, and 500 ms forced-cut
-overlap with unique meeting-audio assembly and conservative transcript-boundary deduplication.
-
-EchoNote v0.8.0 includes reproducible local benchmarks for long notes, transcript formatting, WAV assembly, ASR
-temporary I/O, and speaker assignment:
-
-```bash
-cd plugin && npm run benchmark:plugin
-cd ../asr-service && .venv/bin/python benchmarks/performance_benchmark.py
-```
-
-The recorded baseline and final comparison are in `docs/V0_8_0_PERFORMANCE_BASELINE.md`; stable budgets are in
-`docs/performance-budgets.json`.
-
-## Install Plugin Into A Vault
-
-Replace the vault path with your test vault path:
-
-```bash
-mkdir -p "/path/to/TestVault/.obsidian/plugins/echonote"
-
-cp /Users/br/Git/github/rebill/EchoNote/plugin/main.js \
-   /Users/br/Git/github/rebill/EchoNote/plugin/manifest.json \
-   /Users/br/Git/github/rebill/EchoNote/plugin/styles.css \
-   "/path/to/TestVault/.obsidian/plugins/echonote/"
-```
-
-Then in Obsidian:
-
-```text
-Settings → Community plugins → EchoNote → Enable
-```
-
-## EchoNote Settings
-
-Recommended MVP settings:
-
-```text
-Companion discovery path:
-~/Library/Application Support/EchoNote/companion.json
-
-Audio input device:
-Default audio input / BlackHole / Loopback device
-
-Auto-stop on silence:
-Enabled, 10 minutes
-
-Transcript corrections:
-木溪 => 沐曦
-```
-
-For AI summaries, configure either:
-
-- OpenAI-compatible API key, base URL, and model.
-- Anthropic API key and model.
-
-## Basic Workflow
-
-1. Open EchoNote and click `Start Service`.
-2. Open Obsidian and enable EchoNote.
-3. Open `EchoNote Status`.
-4. Confirm Companion status is `available`.
-5. Select an audio input device in EchoNote settings.
-6. Click `Start Meeting`.
-7. Speak or play meeting audio.
-8. Click `Stop Meeting`.
-9. Open the generated meeting note under `Meetings/`.
-10. Click `Summarize Meeting`.
-
-If `Save raw audio` is enabled, EchoNote also saves a matching `*.segments.json` file next to the meeting WAV. When speaker finalization times out or fails, open the meeting note and run `EchoNote: Re-finalize Transcript with Speakers` from the Obsidian command palette to retry from the saved artifacts.
-
-## Recording Meeting Software Audio
-
-EchoNote records from an audio input device. To record Zoom, Google Meet, Feishu, or other meeting software output, configure a virtual audio route.
-
-See:
-
-- [macOS Virtual Audio Guide](docs/MAC_VIRTUAL_AUDIO_GUIDE.md)
-
-Typical setup:
-
-```text
-System Output: Multi-Output Device
-EchoNote Input: BlackHole 2ch
-```
-
-For a mixed source containing both your microphone and meeting software output, Loopback is the easier option.
-
-## Documentation
-
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
-- [Product Requirements](docs/PRD.md)
-- [v0.3.0 Setup Wizard PRD](docs/V0_3_0_SETUP_WIZARD_PRD.md)
-- [v0.3.0 Setup Wizard Technical Design](docs/V0_3_0_SETUP_WIZARD_TECH_DESIGN.md)
-- [v0.3.0 Setup Wizard Tasks](docs/V0_3_0_SETUP_WIZARD_TASKS.md)
-- [v0.4.0 Smart Chunking And Speaker Diarization PRD](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_PRD.md)
-- [v0.4.0 Smart Chunking And Speaker Diarization Technical Design](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_TECH_DESIGN.md)
-- [v0.4.0 Smart Chunking And Speaker Diarization Tasks](docs/V0_4_0_SMART_CHUNKING_SPEAKER_DIARIZATION_TASKS.md)
-- [v0.2.0 Tauri ASR Companion PRD](docs/V0_2_0_TAURI_COMPANION_PRD.md)
-- [v0.2.0 Tauri ASR Companion Technical Design](docs/V0_2_0_TAURI_COMPANION_TECH_DESIGN.md)
-- [v0.2.0 Tauri ASR Companion Tasks](docs/V0_2_0_TAURI_COMPANION_TASKS.md)
-- [Technical Design](docs/TECH_DESIGN.md)
-- [Delivery Plan](docs/DELIVERY_PLAN.md)
-- [Release Process](docs/RELEASE.md)
-- [API Contract](docs/API_CONTRACT.md)
-- [M3 Real ASR Spike](docs/M3_REAL_ASR_SPIKE.md)
-- [M6 E2E Test Plan](docs/M6_E2E_TEST_PLAN.md)
-- [macOS Virtual Audio Guide](docs/MAC_VIRTUAL_AUDIO_GUIDE.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Privacy](docs/PRIVACY.md)
+Tagged releases attach the installers and `SHA256SUMS.txt` to a GitHub release (see [CI and releases](#ci-and-releases)), or you can build them yourself (see [Release build](#release-build)). Because the builds are unsigned, Gatekeeper and SmartScreen block the first launch. [docs/V1_0_0_DESKTOP_APP_INSTALL.md](docs/V1_0_0_DESKTOP_APP_INSTALL.md) explains how to verify the checksums, allow the app, grant permissions, uninstall, and build a self-signed copy.
 
 ## Privacy
 
-- ASR transcription runs locally.
-- Speaker diarization runs locally when configured.
-- Meeting audio is not sent to cloud ASR providers.
-- Raw audio is not saved by default.
-- If AI summary uses a cloud LLM provider, the transcript is sent to that provider.
+Audio, transcripts and the library stay on your computer. There is no account and no telemetry. The app goes online only when you download a model in Settings or use an AI feature. In that case the meeting's transcript text, never the audio, goes to the provider you configured. Before the first send to a non-local provider the app asks you to confirm, and it asks again if the provider's scheme, host or port changes.
 
-See [Privacy](docs/PRIVACY.md).
+Data directory: `~/Library/Application Support/com.rebill.echonote` on macOS, `%APPDATA%\com.rebill.echonote` on Windows. See [docs/V1_0_0_DESKTOP_APP_PRIVACY.md](docs/V1_0_0_DESKTOP_APP_PRIVACY.md).
+
+## Repository layout
+
+```text
+app/                    Desktop app: Svelte 5 frontend (app/src) and Tauri 2 Rust shell (app/src-tauri)
+crates/echonote-core    Capture, VAD, segmenter, ASR (sherpa-onnx, linked statically), SQLite store,
+                        Ogg/Opus recording, export, engine. No Tauri dependency.
+crates/echonote-llm     OpenAI-compatible and Anthropic streaming clients; summary, Q&A, correction
+crates/echonote-models  Model manager: manifest, resumable verified downloads, atomic install
+crates/echonote-opus    Vendored libopus with a minimal encoder and decoder
+crates/echonote-bench   ASR benchmarks and the regression gates CI runs
+scripts/dev/            Development, packaging and test scripts
+third_party/            Inputs for the third-party notices
+docs/                   v1 product, design and user documents (V1_0_0_*), plus legacy documents
+plugin/ companion/ asr-service/   Frozen v0.x product, see Legacy code below
+```
+
+## Build from source
+
+### Prerequisites
+
+- Rust stable, 1.90 or later (required by the Tauri app crate).
+- Node.js (CI uses 22) and pnpm 10.11.0 (pinned in `app/package.json`).
+- Python 3 for `scripts/dev/`. The scripts use only the standard library.
+- The [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS: Xcode Command Line Tools on macOS; Microsoft C++ Build Tools ("Desktop development with C++") and WebView2 on Windows.
+
+The commands below use POSIX shell syntax. In PowerShell, set variables with `$env:NAME = "value"`.
+
+### sherpa-onnx native library
+
+`echonote-core` links sherpa-onnx 2.0.1 statically. If `SHERPA_ONNX_ARCHIVE_DIR` is not set, the `sherpa-onnx-sys` build script downloads the archive without checking it. Fetch the pinned archive once, which verifies its SHA-256, and point the build at the folder with an absolute path:
+
+```sh
+python3 scripts/dev/fetch_sherpa_onnx.py "$HOME/.cache/echonote-dev/sherpa-onnx"
+export SHERPA_ONNX_ARCHIVE_DIR="$HOME/.cache/echonote-dev/sherpa-onnx"
+```
+
+The target defaults to the host. Pass a Rust target as the second argument to fetch another one: `aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-pc-windows-msvc`.
+
+### Development models
+
+Debug builds also look for models in `$ECHONOTE_DEV_DATA/models` (default `~/.cache/echonote-dev/models`). Fetch the live model and the VAD, and optionally the high-accuracy model:
+
+```sh
+python3 scripts/dev/fetch_assets.py sense-voice-int8 vad   # about 240 MB
+python3 scripts/dev/fetch_assets.py qwen3-asr-int8         # optional, about 990 MB
+```
+
+Every file is checked against the SHA-256 in `crates/echonote-bench/assets.json`. `--list` prints all asset ids. Running the script with no arguments fetches everything, about 5.5 GB including the benchmark evaluation sets.
+
+### Run
+
+```sh
+cd app && pnpm install && pnpm tauri dev
+```
+
+This starts the Vite dev server on `127.0.0.1:1420` and a debug build of the app. Debug builds keep API keys under a separate keychain service (`com.rebill.echonote.debug`), but they use the same data directory as the installed app. Set `ECHONOTE_DATA_DIR` to keep test meetings out of your real library.
+
+Debug builds read these variables; release builds ignore them. The full list is in `app/src-tauri/src/dev.rs`.
+
+| Variable | Effect |
+| --- | --- |
+| `ECHONOTE_DATA_DIR` | Library and recordings directory |
+| `ECHONOTE_FAKE_INPUT` | Directory with `mic.wav` (and optionally `sys.wav`), played in real time instead of the devices |
+| `ECHONOTE_MODEL_MIRROR` | Base URL that replaces every model download source |
+
+`scripts/dev/app_smoke.sh` and `scripts/dev/soak.sh` drive the real UI with fake input in a scratch library. Their header comments list what they need.
+
+### Test
+
+The app crate embeds `app/dist`, so build the frontend before running the Rust tests:
+
+```sh
+(cd app && pnpm install && pnpm check && pnpm test && pnpm build)
+cargo test --workspace
+(cd scripts/dev && python3 -m unittest discover -s tests)
+```
+
+CI also runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and `cargo run --locked -p echonote-bench -- gate`. The gate runs deterministic regression checks on synthetic fixtures and needs no models.
+
+### Release build
+
+From the repository root, in the order `release.yml` uses. The release checklist is in [docs/V1_0_0_DESKTOP_APP_RELEASE.md](docs/V1_0_0_DESKTOP_APP_RELEASE.md).
+
+```sh
+python3 scripts/dev/stage_bundle_models.py
+(cd app && pnpm install --frozen-lockfile)
+python3 scripts/dev/gen_notices.py
+(cd app && pnpm bundle --target aarch64-apple-darwin --bundles app,dmg)
+python3 scripts/dev/check_bundle.py target/aarch64-apple-darwin/release aarch64-apple-darwin
+```
+
+| Installer | `--target` | `--bundles` |
+| --- | --- | --- |
+| macOS arm64 DMG | `aarch64-apple-darwin` | `app,dmg` |
+| macOS x64 DMG | `x86_64-apple-darwin` | `app,dmg` |
+| Windows x64 NSIS | `x86_64-pc-windows-msvc` | `nsis` |
+
+- `stage_bundle_models.py` copies the live model and VAD files listed in `crates/echonote-models/manifest.json` into `app/src-tauri/resources/models/` and checks each SHA-256. It copies from the dev models when they match and downloads otherwise; `--offline` fails instead of downloading.
+- `gen_notices.py` writes `app/src-tauri/resources/THIRD_PARTY_NOTICES.txt` from `third_party/notices.json`, `app/node_modules` and `cargo metadata`, so run it after `pnpm install`.
+- `pnpm bundle` runs `tauri build` with `app/src-tauri/tauri.bundle.conf.json`, which adds the models, the notices and `License` (as `LICENSE.txt`). Output goes to `target/<target>/release/bundle/`.
+- `check_bundle.py` checks the bundled models and notices and the 300 MiB installer budget (`app.installerMiB` in `docs/v1-performance-budgets.json`). It prints a JSON report and exits with status 1 on any failure.
+- For a target other than the host, run `rustup target add <target>` and fetch that target's sherpa-onnx archive first. CI builds the macOS x64 DMG this way on an Apple silicon runner.
+
+## CI and releases
+
+- `.github/workflows/desktop.yml` runs the frontend checks, script tests, format, clippy, Rust tests and bench gates on macOS arm64 and Windows x64.
+- `.github/workflows/release.yml` runs the same checks, then builds the three installers. A pushed `v1.*` tag must match the version in `app/package.json`. The tag creates a draft GitHub release with the installers and `SHA256SUMS.txt`, marked as a pre-release when the tag has a suffix such as `-alpha.0`. Publishing the draft is manual. A manual run of the workflow uploads the installers as workflow artifacts only.
+- `.github/workflows/ci.yml` tests the legacy plugin and ASR service.
+
+## Documentation
+
+The v1 documents are in Simplified Chinese.
+
+- [Installation](docs/V1_0_0_DESKTOP_APP_INSTALL.md): system requirements, checksums, Gatekeeper and SmartScreen, self-signed builds
+- [Privacy](docs/V1_0_0_DESKTOP_APP_PRIVACY.md)
+- [Troubleshooting](docs/V1_0_0_DESKTOP_APP_TROUBLESHOOTING.md)
+- [Product requirements](docs/V1_0_0_DESKTOP_APP_PRD.md)
+- [Technical design](docs/V1_0_0_DESKTOP_APP_TECH_DESIGN.md)
+- [Tasks and milestones](docs/V1_0_0_DESKTOP_APP_TASKS.md)
+- [Release process](docs/V1_0_0_DESKTOP_APP_RELEASE.md)
+- [Changelog](CHANGELOG.md): the `1.0.0-alpha.0` entry and its known limitations
+
+## Legacy code
+
+`plugin/`, `companion/` and `asr-service/` are the v0.x product: an Obsidian plugin, a Tauri companion app, and a local Python ASR service. They are frozen. They will be removed after v1 ships, once the removal is approved separately ([docs/V1_0_0_LEGACY_REMOVAL_PROPOSAL.md](docs/V1_0_0_LEGACY_REMOVAL_PROPOSAL.md)). `CONTRIBUTING.md`, `versions.json`, the scripts outside `scripts/dev/`, and the documents in `docs/` without a `V1_0_0_` or `v1-` prefix describe that product. `CHANGELOG.md` covers both.
+
+## Third-party notices
+
+[NOTICE](NOTICE) lists the bundled models and the linked native libraries. Each installer includes `THIRD_PARTY_NOTICES.txt` with every license text, generated by `scripts/dev/gen_notices.py`. The bundled SenseVoice model is under the FunASR Model Open Source License 1.1, not under EchoNote's license.
+
+## License
+
+EchoNote is source-available under the PolyForm Noncommercial License 1.0.0.
+
+Personal, educational, and non-commercial use is allowed.
+
+Commercial use requires a separate commercial license. See [License](License).

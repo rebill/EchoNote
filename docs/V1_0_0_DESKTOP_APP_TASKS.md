@@ -42,7 +42,8 @@
 - [x] Spike E: macOS 15.7.7 WKWebView plays, seeks and decodes Ogg/Opus, WebM/Opus and CAF/Opus (`scripts/dev/webview_audio_probe.sh`).
 - [ ] Spike E: macOS 14.2 WebKit and WebView2.
 - [x] License review (tech design section 15); TEN VAD excluded by default.
-- [ ] Confirm the streaming Zipformer license before any S2 decision; write NOTICE in M2 with the final dependency list.
+- [x] Write NOTICE with the final dependency list (done in M6: `NOTICE`, `scripts/dev/gen_notices.py`).
+- [ ] Confirm the streaming Zipformer license before any S2 decision. Not needed while S1 ships; v1 does not bundle or download the streaming model.
 - [x] Architecture review of the technical design; findings folded into the design (section 18).
 - [ ] Idle-time benchmark matrix on macOS (`scripts/dev/run_m0_bench.py`) and Windows (`windows_m0.ps1 -Step bench`).
 - [ ] User sign-off on the memory budget split (core steady 450 MB, peak 550 MB, WebView 150 MB).
