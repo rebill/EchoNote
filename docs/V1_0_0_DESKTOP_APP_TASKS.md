@@ -85,7 +85,7 @@ Acceptance targets:
 - [x] Model lifecycle: lazy load on record, buffered audio while loading, unload after 10 minutes idle.
 - [x] `echonote-bench` regression gates: invariants, decode-work ratio, queue bound, error rate on frozen fixtures (`echonote-bench gate`; words lost and crosstalk on synthetic fixtures in CI, real-model error rate stays in `echonote-bench eval` because eval audio cannot be redistributed).
 - [x] CI on macOS and Windows runners: fmt, clippy, tests, bench gates (`.github/workflows/desktop.yml`, sherpa archive checked against pinned SHA-256).
-- [ ] First green run of the desktop workflow on GitHub; confirm the test counts match a local run. Needs a push, which waits for the user.
+- [x] First green run of the desktop workflow on GitHub; confirm the test counts match a local run. Run 41267149426 (cfde2a8): macOS arm64 and Windows x64 each pass 167 Rust tests (1 ignored), the same as locally, plus 16 script tests and the bench gate. Fixing Windows took three changes: POSIX paths in a script test, the macOS app menu gated to macOS, and a longer timeout for the refused-connection test (Windows takes about 2 s to refuse).
 - [ ] Real-device run of the M1 capture code: macOS tap and microphone in `scripts/dev/live_demo.sh` (TCC prompt), WASAPI process and endpoint loopback on Windows 10 and 11 (needs a Windows machine).
 
 Acceptance targets:
