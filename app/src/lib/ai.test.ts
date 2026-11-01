@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { diff, tokens } from "./diff";
 import { inline, parse, plainText, timeMs, withoutTitle, type Block, type Inline } from "./markdown";
+import { origin } from "./presets";
 
 const text = (nodes: Inline[]) => plainText(nodes);
 
@@ -129,5 +130,15 @@ describe("diff", () => {
       { kind: "del", text: before },
       { kind: "add", text: after },
     ]);
+  });
+});
+
+describe("provider origin", () => {
+  it("compares scheme, host and port like the backend", () => {
+    expect(origin("https://api.openai.com/v1")).toBe(origin(" https://API.openai.com:443/other "));
+    expect(origin("https://api.openai.com/v1")).not.toBe(origin("https://relay.example.com/v1"));
+    expect(origin("http://localhost:11434/v1")).not.toBe(origin("http://localhost:1234/v1"));
+    expect(origin("http://example.com")).not.toBe(origin("https://example.com"));
+    expect(origin("not a url")).toBeNull();
   });
 });

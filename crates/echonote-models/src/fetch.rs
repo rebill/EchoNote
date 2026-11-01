@@ -1,7 +1,7 @@
 //! One file, resumable: bytes go to `<file>.part`, a retry asks for the rest with `Range`,
 //! and the file is renamed into place only when its size and SHA-256 match.
 
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -50,6 +50,12 @@ fn hash_existing(file: &mut std::fs::File, hasher: &mut Sha256) -> std::io::Resu
     }
 }
 
+/// Empty the part file and write from its start again.
+fn restart(file: &mut std::fs::File) -> std::io::Result<()> {
+    file.set_len(0)?;
+    file.rewind()
+}
+
 /// The `Content-Range` start of a 206 answer.
 fn range_start(response: &reqwest::Response) -> Option<u64> {
     response
@@ -73,15 +79,19 @@ pub(crate) async fn fetch(
     on_bytes: &mut (dyn FnMut(u64) + Send),
 ) -> Result<(), ModelError> {
     let part = part_path(target.path);
+    // Not `append`: on Windows an append-only handle cannot be truncated (`set_len` needs
+    // write access), so the handle writes at the end it seeks to.
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .read(true)
-        .append(true)
+        .write(true)
+        .truncate(false)
         .open(&part)?;
     let mut hasher = Sha256::new();
     let mut have = hash_existing(&mut file, &mut hasher)?;
+    file.seek(SeekFrom::End(0))?;
     if have > target.size {
-        file.set_len(0)?;
+        restart(&mut file)?;
         (have, hasher) = (0, Sha256::new());
     }
     on_bytes(have);
@@ -97,7 +107,7 @@ pub(crate) async fn fetch(
         match response.status().as_u16() {
             206 if range_start(&response) == Some(have) => {}
             206 => {
-                file.set_len(0)?;
+                restart(&mut file)?;
                 return Err(ModelError::Network(
                     "the server resumed at another place".into(),
                 ));
@@ -105,13 +115,13 @@ pub(crate) async fn fetch(
             // The server sends the whole file again.
             200 => {
                 if have > 0 {
-                    file.set_len(0)?;
+                    restart(&mut file)?;
                     (have, hasher) = (0, Sha256::new());
                     on_bytes(0);
                 }
             }
             416 => {
-                file.set_len(0)?;
+                restart(&mut file)?;
                 return Err(ModelError::Http(416));
             }
             status => return Err(ModelError::Http(status)),
@@ -141,6 +151,8 @@ pub(crate) async fn fetch(
             return Err(ModelError::Network("the download stopped early".into()));
         }
     }
+    // On disk before the name says it is complete.
+    file.sync_all()?;
     drop(file);
     if format!("{:x}", hasher.finalize()) != target.sha256 {
         let _ = std::fs::remove_file(&part);

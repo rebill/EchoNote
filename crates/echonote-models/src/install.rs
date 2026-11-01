@@ -1,10 +1,12 @@
 //! Installing a model: each file from the mirrors in turn (a few tries each), the release
 //! archive as the last resort, all of it in a staging directory renamed into place at the end.
 
+use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::cancel::{Cancel, unless_cancelled};
 use crate::fetch::{IDLE, Target, fetch, part_path};
@@ -79,9 +81,10 @@ impl Installer {
         self
     }
 
-    /// Install `model` into `target`, continuing an earlier attempt. Returns at once when it
-    /// is already complete. Extracting an archive blocks the thread, so run this on a thread
-    /// of its own. `target` must be a directory the app owns: an incomplete one is replaced.
+    /// Install `model` into `target`, continuing an earlier attempt. A complete copy is hashed
+    /// and kept when every file matches; a damaged one is repaired, downloading only its bad
+    /// files. Hashing and extracting block the thread, so run this on a thread of its own.
+    /// `target` must be a directory the app owns: an incomplete one is replaced.
     pub async fn install(
         &self,
         model: &Model,
@@ -89,10 +92,10 @@ impl Installer {
         cancel: &Cancel,
         on_progress: &mut (dyn FnMut(Progress) + Send),
     ) -> Result<(), ModelError> {
-        if model.is_complete(target) {
+        let staging = staging_dir(target);
+        if model.is_complete(target) && keep_good_files(model, target, &staging, cancel)? {
             return Ok(());
         }
-        let staging = staging_dir(target);
         std::fs::create_dir_all(&staging)?;
         let total = model.size();
         check_space(&staging, total - staged_bytes(model, target))?;
@@ -275,6 +278,64 @@ fn check_space(dir: &Path, needed: u64) -> Result<(), ModelError> {
     }
 }
 
+fn hash_file(path: &Path, cancel: &Cancel) -> Result<String, ModelError> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        if cancel.is_cancelled() {
+            return Err(ModelError::Cancelled);
+        }
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(format!("{:x}", hasher.finalize()));
+        }
+        hasher.update(&buffer[..read]);
+    }
+}
+
+/// Whether the complete copy in `target` is sound. If a file is not, the good ones move to
+/// `staging` and `target` goes, so the install downloads only the bad ones and the app never
+/// loads the damaged copy meanwhile.
+fn keep_good_files(
+    model: &Model,
+    target: &Path,
+    staging: &Path,
+    cancel: &Cancel,
+) -> Result<bool, ModelError> {
+    let mut good = Vec::new();
+    for file in &model.files {
+        if hash_file(&target.join(&file.path), cancel)? == file.sha256 {
+            good.push(file);
+        }
+    }
+    if good.len() == model.files.len() {
+        return Ok(true);
+    }
+    for file in good {
+        let to = staging.join(&file.path);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let _ = std::fs::remove_file(part_path(&to));
+        std::fs::rename(target.join(&file.path), &to)?;
+    }
+    std::fs::remove_dir_all(target)?;
+    Ok(false)
+}
+
+/// Flush a directory's entries (new names, renames) to disk. Windows has no such call; its
+/// renames are journaled.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// Move the finished staging directory into place.
 fn finish(model: &Model, staging: &Path, target: &Path) -> Result<(), ModelError> {
     if !model.is_complete(staging) {
@@ -282,10 +343,23 @@ fn finish(model: &Model, staging: &Path, target: &Path) -> Result<(), ModelError
             "files are missing after the download".into(),
         ));
     }
+    // The files' names are durable before the directory's: a crash cannot leave a
+    // complete-looking model with entries missing.
+    for dir in model
+        .files
+        .iter()
+        .filter_map(|file| staging.join(&file.path).parent().map(Path::to_path_buf))
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        sync_dir(&dir)?;
+    }
     if target.exists() {
         std::fs::remove_dir_all(target)?;
     }
     std::fs::rename(staging, target)?;
+    if let Some(parent) = target.parent() {
+        sync_dir(parent)?;
+    }
     Ok(())
 }
 

@@ -7,6 +7,9 @@ docs/v1-performance-budgets.json. Prints a JSON report; exit status 1 on any fai
 
     python3 scripts/dev/check_bundle.py <cargo release dir> <rust target>
     e.g. python3 scripts/dev/check_bundle.py target/x86_64-pc-windows-msvc/release x86_64-pc-windows-msvc
+
+    python3 scripts/dev/check_bundle.py --installed <install dir> <rust target>
+    checks the files an installer put on disk (Windows: next to the executable).
 """
 
 from __future__ import annotations
@@ -32,12 +35,8 @@ def layout(release: Path, target: str) -> tuple[Path | None, list[Path]]:
     return release, sorted((bundle / "nsis").glob("*-setup.exe"))
 
 
-def check(release: Path, target: str, manifest: dict, budget_mib: float) -> dict:
-    resources, installers = layout(release, target)
+def resource_problems(resources: Path, manifest: dict) -> list[str]:
     problems = []
-    if resources is None:
-        problems.append("no .app bundle")
-        resources = release / "missing"
     for model in manifest["models"]:
         if model["role"] not in BUNDLED_ROLES:
             continue
@@ -50,6 +49,16 @@ def check(release: Path, target: str, manifest: dict, budget_mib: float) -> dict
     for name in ("THIRD_PARTY_NOTICES.txt", "LICENSE.txt"):
         if not (resources / name).is_file():
             problems.append(f"missing {resources / name}")
+    return problems
+
+
+def check(release: Path, target: str, manifest: dict, budget_mib: float) -> dict:
+    resources, installers = layout(release, target)
+    problems = []
+    if resources is None:
+        problems.append("no .app bundle")
+        resources = release / "missing"
+    problems += resource_problems(resources, manifest)
     if not installers:
         problems.append(f"no installer under {release / 'bundle'}")
     sizes = {path.name: round(path.stat().st_size / MIB, 1) for path in installers}
@@ -57,13 +66,25 @@ def check(release: Path, target: str, manifest: dict, budget_mib: float) -> dict
     return {"target": target, "installersMiB": sizes, "budgetMiB": budget_mib, "problems": problems}
 
 
+def check_installed(directory: Path, target: str, manifest: dict) -> dict:
+    resources = directory / "Contents" / "Resources" if "apple-darwin" in target else directory
+    return {"target": target, "installed": str(directory), "problems": resource_problems(resources, manifest)}
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    installed = args[:1] == ["--installed"]
+    if installed:
+        args = args[1:]
+    if len(args) != 2:
         print(__doc__, file=sys.stderr)
         return 2
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    budget = json.loads(BUDGETS.read_text(encoding="utf-8"))["app"]["installerMiB"]
-    report = check(Path(sys.argv[1]), sys.argv[2], manifest, budget)
+    if installed:
+        report = check_installed(Path(args[0]), args[1], manifest)
+    else:
+        budget = json.loads(BUDGETS.read_text(encoding="utf-8"))["app"]["installerMiB"]
+        report = check(Path(args[0]), args[1], manifest, budget)
     print(json.dumps(report, indent=2))
     return 1 if report["problems"] else 0
 

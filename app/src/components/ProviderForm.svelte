@@ -4,7 +4,7 @@
   import { ai, aiErrorText } from "../lib/ai.svelte";
   import { t } from "../lib/i18n.svelte";
   import { api, asCommandError } from "../lib/ipc";
-  import { PRESETS, inputFor, preset } from "../lib/presets";
+  import { PRESETS, inputFor, origin, preset } from "../lib/presets";
   import type { Provider, ProviderInput } from "../lib/types";
 
   let {
@@ -43,12 +43,16 @@
     ),
   );
   const hasKey = untrack(() => provider?.hasKey ?? false);
+  const savedOrigin = untrack(() => (provider ? origin(provider.baseUrl) : null));
   let key = $state("");
   let clearKey = $state(false);
   let busy = $state(false);
   let status = $state<{ ok: boolean; text: string } | null>(null);
   let models = $state<string[]>([]);
   const local = $derived(preset(form.preset).local);
+  // Saved secrets are only reused for the server they were saved for (the backend checks too).
+  const sameServer = $derived(savedOrigin !== null && origin(form.baseUrl) === savedOrigin);
+  const keySaved = $derived(hasKey && sameServer);
   const showAddress = $derived(!compact || ["custom", "ollama", "lmstudio"].includes(form.preset));
   const ready = $derived(form.name.trim() !== "" && form.baseUrl.trim() !== "" && form.model.trim() !== "");
   const listId = `models-${Math.random().toString(36).slice(2)}`;
@@ -73,7 +77,7 @@
     return {
       ...form,
       proxy: form.proxy?.trim() ? form.proxy.trim() : null,
-      apiKey: clearKey ? "" : key.trim() ? key.trim() : form.id ? null : "",
+      apiKey: clearKey && keySaved ? "" : key.trim() ? key.trim() : keySaved ? null : "",
       headers: form.headers.filter(([name]) => name.trim() !== ""),
     };
   }
@@ -175,11 +179,11 @@
       spellcheck="false"
       maxlength="4096"
       bind:value={key}
-      disabled={clearKey}
-      placeholder={hasKey ? t("provider.keySaved") : local ? t("provider.keyOptional") : "sk-…"}
+      disabled={clearKey && keySaved}
+      placeholder={keySaved ? t("provider.keySaved") : local ? t("provider.keyOptional") : "sk-…"}
     />
   </label>
-  {#if hasKey}
+  {#if keySaved}
     <label class="check">
       <input type="checkbox" bind:checked={clearKey} />
       <span>{t("provider.clearKey")}</span>
@@ -228,7 +232,7 @@
             <input
               type="password"
               autocomplete="off"
-              placeholder={provider?.headerNames.includes(header[0]) ? t("provider.headerSaved") : t("provider.headerValue")}
+              placeholder={sameServer && provider?.headerNames.includes(header[0]) ? t("provider.headerSaved") : t("provider.headerValue")}
               bind:value={header[1]}
               maxlength="4096"
             />

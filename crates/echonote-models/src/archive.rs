@@ -74,6 +74,7 @@ pub(crate) fn extract(
             on_bytes(done + size);
         }
         out.flush()?;
+        out.sync_all()?;
         drop(out);
         if size != file.size || format!("{:x}", hasher.finalize()) != file.sha256 {
             let _ = std::fs::remove_file(&part);

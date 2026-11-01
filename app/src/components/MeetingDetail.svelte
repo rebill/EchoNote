@@ -141,6 +141,7 @@
     busy = true;
     try {
       await api.deleteMeeting(id);
+      ai.forget(id);
       app.view = { name: "home" };
       await app.loadMeetings();
     } catch (error) {

@@ -225,6 +225,40 @@ fn installs_from_the_first_mirror_and_skips_a_complete_model() {
 }
 
 #[test]
+fn a_same_size_damaged_copy_is_repaired() {
+    let (a, b) = (bytes(11, 40_000), bytes(12, 2_000));
+    let files: [(&str, &[u8]); 2] = [("model.onnx", &a), ("tokenizer/vocab.json", &b)];
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("test-model");
+    run(async {
+        let served = [
+            ("/m/model.onnx".to_owned(), a.clone()),
+            ("/m/tokenizer/vocab.json".to_owned(), b.clone()),
+        ];
+        let (plan, base) = serve(Plan {
+            files: served.into(),
+            ..Plan::default()
+        })
+        .await;
+        let model = model(&files, vec![format!("{base}/m")], None);
+        install(&model, &target).await.unwrap();
+        let mut damaged = b.clone();
+        damaged[7] ^= 0xff;
+        std::fs::write(target.join("tokenizer/vocab.json"), &damaged).unwrap();
+        assert!(model.is_complete(&target), "the sizes still match");
+
+        install(&model, &target).await.unwrap();
+        assert_installed(&target, &files);
+        let requests = plan.requests();
+        assert_eq!(requests.len(), 3, "{requests:?}");
+        assert_eq!(
+            requests[2].0, "/m/tokenizer/vocab.json",
+            "only the bad file"
+        );
+    });
+}
+
+#[test]
 fn a_dropped_connection_resumes_where_it_stopped() {
     let data = bytes(3, 200_000);
     let files: [(&str, &[u8]); 1] = [("model.onnx", &data)];

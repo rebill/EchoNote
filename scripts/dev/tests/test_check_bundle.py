@@ -54,6 +54,14 @@ class CheckBundleTest(unittest.TestCase):
         self.assertIn("LICENSE.txt", problems[1])
         self.assertIn("is 2.0 MiB, budget 1 MiB", problems[2])
 
+    def test_an_installed_windows_tree_is_checked_without_installers(self) -> None:
+        write(self.release, self.resources(""))
+        self.assertEqual(checker.check_installed(self.release, "x86_64-pc-windows-msvc", MANIFEST)["problems"], [])
+        (self.release / "models" / "vad" / "vad.onnx").unlink()
+        problems = checker.check_installed(self.release, "x86_64-pc-windows-msvc", MANIFEST)["problems"]
+        self.assertEqual(len(problems), 1)
+        self.assertIn("vad.onnx", problems[0])
+
     def test_a_missing_bundle_is_reported(self) -> None:
         problems = checker.check(self.release, "x86_64-apple-darwin", MANIFEST, 300)["problems"]
         self.assertEqual(problems[0], "no .app bundle")

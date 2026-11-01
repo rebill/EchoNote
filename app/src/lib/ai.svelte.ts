@@ -207,6 +207,14 @@ class AiStore {
     if (saved && !this.highlights[meeting]) this.setHighlights(meeting, fromSummary(saved));
   }
 
+  /// Drop what is kept for a deleted meeting: the next recording can get the same id.
+  forget(meeting: number): void {
+    const highlights = { ...this.highlights };
+    delete highlights[meeting];
+    this.highlights = highlights;
+    this.runs = Object.fromEntries(Object.entries(this.runs).filter(([id]) => !id.startsWith(`${meeting}:`)));
+  }
+
   private setHighlights(meeting: number, highlights: Highlights): void {
     this.highlights = { ...this.highlights, [meeting]: highlights };
   }

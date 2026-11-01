@@ -3,7 +3,7 @@
 数据目录在下文写作 `<数据目录>`：
 
 - macOS：`~/Library/Application Support/com.rebill.echonote`（在访达里按 Shift-Command-G 输入这个路径）
-- Windows：`%APPDATA%\com.rebill.echonote`（在资源管理器地址栏输入）
+- Windows：`%LOCALAPPDATA%\com.rebill.echonote`（在资源管理器地址栏输入）
 
 ## 安装和启动
 

@@ -69,7 +69,7 @@ xattr -dr com.apple.quarantine /Applications/EchoNote.app
 ### 更新和卸载
 
 - 更新：直接运行新版本的安装程序。
-- 卸载：在“设置 → 应用”里卸载 EchoNote。要连数据一起删，再删除 `%APPDATA%\com.rebill.echonote`，并在“凭据管理器 → Windows 凭据”里删除名称包含 `com.rebill.echonote` 的项目。
+- 卸载：在“设置 → 应用”里卸载 EchoNote。要连数据一起删，再删除 `%LOCALAPPDATA%\com.rebill.echonote`，并在“凭据管理器 → Windows 凭据”里删除名称包含 `com.rebill.echonote` 的项目。
 
 ## 自签名构建
 

@@ -74,12 +74,11 @@ impl Endpoint {
     }
 }
 
+/// Only `localhost` itself and loopback IPs: a `*.localhost` name is resolved like any other
+/// (a resolver or proxy may send it off this computer).
 fn is_loopback(url: &Url) -> bool {
     match url.host() {
-        Some(Host::Domain(domain)) => {
-            let domain = domain.to_ascii_lowercase();
-            domain == "localhost" || domain.ends_with(".localhost")
-        }
+        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
         Some(Host::Ipv4(ip)) => ip.is_loopback(),
         Some(Host::Ipv6(ip)) => ip.is_loopback(),
         None => false,
@@ -117,6 +116,17 @@ mod tests {
         assert!(endpoint("http://localhost:11434/v1").url("models").is_ok());
         assert!(endpoint("http://127.0.0.1:1234/v1").is_local());
         assert!(endpoint("http://[::1]:1234/v1").is_local());
+        assert!(endpoint("http://LocalHost:11434/v1").is_local());
+        assert!(endpoint("http://127.8.0.1:1234/v1").is_local());
+        for remote in [
+            "http://api.localhost:11434/v1",
+            "http://localhost.example.com/v1",
+            "http://[::2]:1234/v1",
+        ] {
+            let remote = endpoint(remote);
+            assert!(!remote.is_local(), "{}", remote.base_url);
+            assert!(matches!(remote.url("models"), Err(LlmError::InsecureUrl)));
+        }
         assert_eq!(
             endpoint("https://API.example.com:8443/v1?x=1")
                 .origin()

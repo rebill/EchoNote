@@ -7,7 +7,7 @@ EchoNote 在你的电脑上录音和转写。没有账户，不收集遥测和�
 数据目录：
 
 - macOS：`~/Library/Application Support/com.rebill.echonote`
-- Windows：`%APPDATA%\com.rebill.echonote`
+- Windows：`%LOCALAPPDATA%\com.rebill.echonote`
 
 | 内容 | 位置 | 说明 |
 |---|---|---|

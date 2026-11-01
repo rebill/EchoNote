@@ -106,7 +106,9 @@ fn setup(app: &mut tauri::App, dev: dev::Dev) -> Result<(), Box<dyn std::error::
     let handle = app.handle().clone();
     let data_dir = match &dev.data_dir {
         Some(dir) => dir.clone(),
-        None => app.path().app_data_dir()?,
+        // Local, not roaming, on Windows: recordings and models stay on this machine. On
+        // macOS both are `~/Library/Application Support/<identifier>`.
+        None => app.path().app_local_data_dir()?,
     };
     std::fs::create_dir_all(&data_dir)?;
     log::init(&data_dir);

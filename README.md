@@ -28,7 +28,7 @@ Tagged releases attach the installers and `SHA256SUMS.txt` to a GitHub release (
 
 Audio, transcripts and the library stay on your computer. There is no account and no telemetry. The app goes online only when you download a model in Settings or use an AI feature. In that case the meeting's transcript text, never the audio, goes to the provider you configured. Before the first send to a non-local provider the app asks you to confirm, and it asks again if the provider's scheme, host or port changes.
 
-Data directory: `~/Library/Application Support/com.rebill.echonote` on macOS, `%APPDATA%\com.rebill.echonote` on Windows. See [docs/V1_0_0_DESKTOP_APP_PRIVACY.md](docs/V1_0_0_DESKTOP_APP_PRIVACY.md).
+Data directory: `~/Library/Application Support/com.rebill.echonote` on macOS, `%LOCALAPPDATA%\com.rebill.echonote` on Windows. See [docs/V1_0_0_DESKTOP_APP_PRIVACY.md](docs/V1_0_0_DESKTOP_APP_PRIVACY.md).
 
 ## Repository layout
 

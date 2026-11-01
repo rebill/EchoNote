@@ -140,17 +140,30 @@ pub enum ModelError {
     Checksum(String),
     #[error("the archive has no {0}")]
     MissingInArchive(String),
+    /// A write failed for want of space (the free-space check before a download can be
+    /// outrun by other programs).
+    #[error("the disk is full")]
+    StorageFull,
     #[error("cancelled")]
     Cancelled,
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for ModelError {
+    fn from(error: std::io::Error) -> Self {
+        match error.kind() {
+            std::io::ErrorKind::StorageFull => Self::StorageFull,
+            _ => Self::Io(error),
+        }
+    }
 }
 
 impl ModelError {
     /// A fixed name for logs and the UI's translations.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::DiskFull { .. } => "model-disk-full",
+            Self::DiskFull { .. } | Self::StorageFull => "model-disk-full",
             Self::Network(_) => "model-network",
             Self::Http(_) => "model-http",
             Self::Checksum(_) | Self::MissingInArchive(_) => "model-checksum",
@@ -227,6 +240,14 @@ mod tests {
                 assert!(known.contains(&entry), "{} {}", model.id, file.path);
             }
         }
+    }
+
+    #[test]
+    fn a_full_disk_is_named_as_such() {
+        let full = ModelError::from(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        assert_eq!(full.code(), "model-disk-full");
+        let other = ModelError::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(other.code(), "io");
     }
 
     #[test]

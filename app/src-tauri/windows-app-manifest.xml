@@ -1,0 +1,23 @@
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- Tauri's default manifest (tauri-build 2.7, src/windows-app-manifest.xml): common
+       controls 6 for native dialogs. DPI awareness is not declared; tao sets it at run time. -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <!-- UTF-8 as the process code page (Windows 10 1903+), so model paths under a non-ASCII
+       user folder reach sherpa-onnx's narrow-string APIs intact. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

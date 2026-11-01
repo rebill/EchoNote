@@ -32,6 +32,17 @@ export function preset(id: string): Preset {
 }
 
 /// The form for a saved provider, secrets left blank (kept unless replaced).
+/// scheme://host:port, the way the backend compares servers; null for an invalid address.
+export function origin(address: string): string | null {
+  try {
+    const url = new URL(address.trim());
+    const port = url.port || (url.protocol === "https:" ? "443" : url.protocol === "http:" ? "80" : "");
+    return `${url.protocol}//${url.hostname}:${port}`;
+  } catch {
+    return null;
+  }
+}
+
 export function inputFor(provider: Provider): ProviderInput {
   return {
     id: provider.id,

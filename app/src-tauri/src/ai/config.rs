@@ -21,6 +21,9 @@ const MAX_KEY: usize = 4_096;
 const MAX_HEADERS: usize = 10;
 const MAX_HEADER_NAME: usize = 64;
 const MAX_HEADER_VALUE: usize = 4_096;
+/// The keychain entry as JSON. The Windows Credential Manager holds 2,560 bytes of UTF-16
+/// (1,280 characters); the same limit everywhere keeps a library portable.
+const MAX_SECRET: usize = 1_200;
 pub const CONTEXT_TOKENS: std::ops::RangeInclusive<usize> = 2_048..=2_000_000;
 pub const OUTPUT_TOKENS: std::ops::RangeInclusive<usize> = 256..=128_000;
 pub const DEFAULT_TEMPLATE: &str = "general";
@@ -239,7 +242,8 @@ fn one_line(text: &str, max: usize) -> bool {
 }
 
 impl ProviderInput {
-    /// The provider and its secret, checked. Empty secret fields keep what `saved` has.
+    /// The provider and its secret, checked. Empty secret fields keep what `saved` has, but
+    /// only for the same server: a saved key never goes to an address it was not entered for.
     pub fn resolve(self, saved: Option<(&Provider, &Secret)>) -> CommandResult<(Provider, Secret)> {
         let name = self.name.trim().to_owned();
         let base_url = self.base_url.trim().to_owned();
@@ -271,8 +275,31 @@ impl ProviderInput {
         if self.headers.len() > MAX_HEADERS {
             return Err(CommandError::invalid("too many headers"));
         }
-        let saved_secret = saved.map(|(_, secret)| secret.clone()).unwrap_or_default();
+        let origin = Endpoint {
+            api: self.api,
+            base_url: base_url.clone(),
+            model: String::new(),
+            api_key: None,
+            headers: Vec::new(),
+            proxy: None,
+            allow_http: self.allow_http,
+        }
+        .origin()?;
+        let (saved_secret, same_server) = match saved {
+            Some((provider, secret)) => (
+                secret.clone(),
+                provider.origin().is_some_and(|saved| saved == origin),
+            ),
+            None => (Secret::default(), false),
+        };
+        let key_required = || {
+            CommandError::new(
+                "key-required",
+                "the server changed; enter the key or header value again",
+            )
+        };
         let api_key = match self.api_key.map(|key| key.trim().to_owned()) {
+            None if saved_secret.api_key.is_some() && !same_server => return Err(key_required()),
             None => saved_secret.api_key.clone(),
             Some(key) if key.is_empty() => None,
             Some(key) if key.len() > MAX_KEY || !visible(&key) => {
@@ -295,12 +322,15 @@ impl ProviderInput {
                 return Err(CommandError::invalid("a header is listed twice"));
             }
             let value = match value.trim() {
-                "" => saved_secret
+                "" => match saved_secret
                     .headers
                     .iter()
                     .find(|(saved, _)| saved.eq_ignore_ascii_case(&name))
-                    .map(|(_, value)| value.clone())
-                    .ok_or_else(|| CommandError::invalid("a header has no value"))?,
+                {
+                    Some(_) if !same_server => return Err(key_required()),
+                    Some((_, value)) => value.clone(),
+                    None => return Err(CommandError::invalid("a header has no value")),
+                },
                 value => value.to_owned(),
             };
             if value.len() > MAX_HEADER_VALUE || !visible(&value) {
@@ -324,6 +354,12 @@ impl ProviderInput {
             consented_origin: saved.and_then(|(provider, _)| provider.consented_origin.clone()),
         };
         let secret = Secret { api_key, headers };
+        if too_long(&secret.to_json(), MAX_SECRET) {
+            return Err(CommandError::new(
+                "secret-too-long",
+                "the API key and header values are too long to save",
+            ));
+        }
         // The client checks the address and proxy the way requests will use them.
         provider.client(secret.clone(), Policy::default())?;
         Ok((provider, secret))
@@ -381,6 +417,83 @@ mod tests {
         };
         let (removed, secret) = remove.resolve(Some((&provider, &secret))).unwrap();
         assert!(!removed.has_key && secret.is_empty());
+    }
+
+    #[test]
+    fn saved_secrets_stay_with_their_server() {
+        let (provider, secret) = input("https://api.deepseek.com/v1").resolve(None).unwrap();
+        let blank = |base_url: &str| ProviderInput {
+            api_key: None,
+            headers: vec![("X-Org".into(), String::new())],
+            ..input(base_url)
+        };
+        let code = |input: ProviderInput| {
+            input
+                .resolve(Some((&provider, &secret)))
+                .err()
+                .map(|error| error.code)
+        };
+        assert_eq!(
+            code(blank("https://api.deepseek.com/beta")),
+            None,
+            "same server"
+        );
+        for other in [
+            "https://evil.example.com/v1",
+            "https://api.deepseek.com:8443/v1",
+            "http://api.deepseek.com/v1",
+        ] {
+            let other = ProviderInput {
+                allow_http: true,
+                ..blank(other)
+            };
+            assert_eq!(code(other), Some("key-required"));
+        }
+        // Each blank field is checked on its own.
+        let key_only = ProviderInput {
+            api_key: None,
+            ..input("https://evil.example.com/v1")
+        };
+        assert_eq!(code(key_only), Some("key-required"));
+        let header_only = ProviderInput {
+            api_key: Some("sk-other".into()),
+            ..blank("https://evil.example.com/v1")
+        };
+        assert_eq!(code(header_only), Some("key-required"));
+        // Nothing saved, nothing to reuse.
+        let (bare, none) = ProviderInput {
+            api_key: Some(String::new()),
+            headers: Vec::new(),
+            ..input("https://api.deepseek.com")
+        }
+        .resolve(None)
+        .unwrap();
+        let moved = ProviderInput {
+            api_key: None,
+            ..input("https://other.example.com")
+        };
+        assert!(moved.resolve(Some((&bare, &none))).is_ok());
+        // Typed again, the secret goes to the new server.
+        assert_eq!(code(input("https://evil.example.com/v1")), None);
+    }
+
+    #[test]
+    fn secrets_fit_the_credential_manager() {
+        let code = |input: ProviderInput| input.resolve(None).err().map(|error| error.code);
+        let key = |len: usize| ProviderInput {
+            api_key: Some("k".repeat(len)),
+            headers: Vec::new(),
+            ..input("https://api.deepseek.com")
+        };
+        assert_eq!(code(key(1_000)), None);
+        assert_eq!(code(key(1_190)), Some("secret-too-long"));
+        let headers = ProviderInput {
+            headers: (0..3)
+                .map(|n| (format!("X-H{n}"), "v".repeat(400)))
+                .collect(),
+            ..input("https://api.deepseek.com")
+        };
+        assert_eq!(code(headers), Some("secret-too-long"));
     }
 
     #[test]

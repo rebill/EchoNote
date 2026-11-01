@@ -29,6 +29,11 @@ impl Secret {
     pub fn is_empty(&self) -> bool {
         self.api_key.is_none() && self.headers.is_empty()
     }
+
+    /// The keychain entry's text.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("secret serializes")
+    }
 }
 
 pub enum Secrets {
@@ -71,7 +76,7 @@ impl Secrets {
         if secret.is_empty() {
             return self.delete(account);
         }
-        let json = serde_json::to_string(secret).expect("secret serializes");
+        let json = secret.to_json();
         match self {
             Self::Keychain => Self::entry(account)?
                 .set_password(&json)

@@ -52,7 +52,11 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    // Replaces Tauri's default Windows manifest; the file keeps what that one has.
+    let windows = tauri_build::WindowsAttributes::new()
+        .app_manifest(include_str!("windows-app-manifest.xml"));
     let attributes = tauri_build::Attributes::new()
+        .windows_attributes(windows)
         .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS));
     tauri_build::try_build(attributes).expect("tauri-build");
 }
