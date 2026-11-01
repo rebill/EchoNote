@@ -143,12 +143,12 @@ Acceptance targets:
 
 ## M5 High-Accuracy Model And Tuning
 
-- [ ] Model manager: manifest with URLs, sizes, SHA-256, mirrors; resumable download; atomic install.
+- [x] Model manager: manifest with URLs, sizes, SHA-256, mirrors; resumable download; atomic install (`crates/echonote-models`: ModelScope, then Hugging Face or GitHub per file, the upstream `.tar.bz2` as the last resort; `Range` resume, size and SHA-256 checked before a file counts, staging directory renamed into place, free-space check; tested against a local server that drops connections, ignores `Range`, serves wrong bytes or 404s. Settings downloads, pauses, resumes and deletes the high-accuracy model and repairs a missing live model or VAD; the smoke run downloads from a local mirror).
 - [x] Verify Qwen3-ASR files against the upstream GitHub release digest before publishing the manifest (`scripts/dev/verify_release_digest.py`: tarball sha256 matches the release; all six files match the manifest by size and SHA-256).
-- [ ] Re-transcribe a saved meeting with the high-accuracy model; keep the previous revision.
+- [x] Re-transcribe a saved meeting with the high-accuracy model; keep the previous revision (`Engine::retranscribe` within the existing segment boundaries; edited, LLM-corrected and crosstalk segments untouched; resumable; stopped by a recording; store V4 `retranscriptions` for undo; glossary terms as hotwords. Smoke run with the dev Qwen3-ASR: 8 of 8 segments changed, undo restored every text).
 - [x] Traditional/Simplified output normalization for models that emit Traditional characters (OpenCC 1.1.9 character table embedded in core, applied to Qwen3-ASR output and its tokens; `scripts/dev/gen_t2s.py` regenerates it).
-- [ ] Tune threads, preview interval, and VAD parameters against the frozen budgets.
-- [ ] 3-hour soak on macOS and on the low-end Windows machine.
+- [ ] Tune threads, preview interval, and VAD parameters against the frozen budgets. Blocked on the idle-time M0 matrix (`scripts/dev/run_m0_bench.py` already sweeps threads 1/2/4, preview interval 0.6/1.0, max speech 6/10 and Qwen3-ASR threads 2/4; only two of its jobs have run) and the Windows run, which also freeze the budgets. Retranscription results now report load and decode time for the Qwen3 thread choice.
+- [ ] 3-hour soak on macOS and on the low-end Windows machine. Harness ready: `scripts/dev/soak.sh [seconds]` (looped fake input through the real UI, optimized `soak` profile, memory and CPU sampled every 30 s, live-list and saved-transcript scroll frame times, stop-to-stored time, A6 verdicts). Short validation run on macOS done (see the tech design); the full 3 hours needs an idle macOS session, and the Windows run needs the low-end Windows machine.
 
 Acceptance targets:
 

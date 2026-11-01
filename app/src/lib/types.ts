@@ -249,6 +249,7 @@ export interface AppInfo {
   smoke: boolean;
   smokeLlm: string | null;
   smokeMirror: boolean;
+  soakSeconds: number | null;
 }
 
 export type Language = "zh-CN" | "en";

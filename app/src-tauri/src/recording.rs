@@ -19,7 +19,7 @@ pub fn start(state: &AppState) -> CommandResult<i64> {
     let engine = state.engine()?;
     let settings = state.settings();
     let mut options = match &state.dev.fake_input {
-        Some(dir) => fake_options(dir)?,
+        Some(dir) => fake_options(dir, state.dev.soak.is_some())?,
         None => device_options(&settings)?,
     };
     options.auto_stop = settings.auto_stop();
@@ -51,14 +51,19 @@ fn device_options(settings: &Settings) -> CommandResult<SessionOptions> {
     ))
 }
 
-/// `mic.wav` and `sys.wav` from `dir`, in real time (debug builds only).
-fn fake_options(dir: &Path) -> CommandResult<SessionOptions> {
+/// `mic.wav` and `sys.wav` from `dir`, in real time, looping for a soak run (debug builds
+/// only).
+fn fake_options(dir: &Path, looping: bool) -> CommandResult<SessionOptions> {
     let open = |name: &str| -> Option<OpenSource> {
         let path = dir.join(name);
         path.is_file().then(|| {
             Box::new(move || {
-                FakeSource::from_wav(&path, Pace::Real)
-                    .map(|source| Box::new(source) as Box<dyn AudioSource>)
+                let source = if looping {
+                    FakeSource::from_wav_looping(&path, Pace::Real)
+                } else {
+                    FakeSource::from_wav(&path, Pace::Real)
+                };
+                source.map(|source| Box::new(source) as Box<dyn AudioSource>)
             }) as OpenSource
         })
     };

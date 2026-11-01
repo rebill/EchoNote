@@ -41,6 +41,8 @@ pub struct AppInfo {
     smoke_llm: Option<String>,
     /// Model downloads go to a local mirror (debug builds).
     smoke_mirror: bool,
+    /// A soak run of this many seconds instead of the smoke checks (debug builds).
+    soak_seconds: Option<u64>,
 }
 
 #[tauri::command]
@@ -65,6 +67,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CommandResu
         smoke: state.dev.smoke.is_some(),
         smoke_llm: state.dev.smoke_llm.clone(),
         smoke_mirror: state.dev.model_mirror.is_some(),
+        soak_seconds: state.dev.soak.map(|soak| soak.as_secs()),
     })
 }
 

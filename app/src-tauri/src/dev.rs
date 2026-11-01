@@ -11,6 +11,8 @@
 //! - `ECHONOTE_SMOKE_LLM`: base URL of the smoke run's mock LLM server, for the UI.
 //! - `ECHONOTE_MODEL_MIRROR`: base URL that replaces every model's mirrors and archive (a
 //!   local server, to test downloads).
+//! - `ECHONOTE_SOAK_SECONDS`: with `ECHONOTE_SMOKE`, a soak run instead: the fake input loops,
+//!   the UI scrolls the live list and stops after this long (`scripts/dev/soak.sh`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,6 +26,7 @@ pub struct Dev {
     pub highlights_interval: Option<Duration>,
     pub smoke_llm: Option<String>,
     pub model_mirror: Option<String>,
+    pub soak: Option<Duration>,
 }
 
 impl Dev {
@@ -43,6 +46,10 @@ impl Dev {
                 .map(Duration::from_secs),
             smoke_llm: std::env::var("ECHONOTE_SMOKE_LLM").ok(),
             model_mirror: std::env::var("ECHONOTE_MODEL_MIRROR").ok(),
+            soak: std::env::var("ECHONOTE_SOAK_SECONDS")
+                .ok()
+                .and_then(|seconds| seconds.parse().ok())
+                .map(Duration::from_secs),
         }
     }
 }

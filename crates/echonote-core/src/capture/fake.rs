@@ -39,6 +39,17 @@ impl FakeSource {
         pace: Pace,
         fail_after_s: Option<f64>,
     ) -> Self {
+        Self::spawn(name.into(), format, samples, pace, fail_after_s, false)
+    }
+
+    fn spawn(
+        name: String,
+        format: SourceFormat,
+        samples: Vec<f32>,
+        pace: Pace,
+        fail_after_s: Option<f64>,
+        looping: bool,
+    ) -> Self {
         let (mut producer, consumer) = ring(format.rate, format.channels, RING_SECONDS);
         let stop = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicBool::new(false));
@@ -52,7 +63,9 @@ impl FakeSource {
             let limit = fail_after_s.map_or(usize::MAX, |s| (s * format.rate as f64) as usize);
             std::thread::spawn(move || {
                 let mut frame = 0usize;
-                for chunk in samples.chunks(block * channels) {
+                let rounds = if looping { usize::MAX } else { 1 };
+                let chunks = (0..rounds).flat_map(|_| samples.chunks(block * channels));
+                for chunk in chunks {
                     if stop.load(Ordering::Relaxed) {
                         break;
                     }
@@ -85,7 +98,7 @@ impl FakeSource {
         Self {
             consumer,
             format,
-            name: name.into(),
+            name,
             stop,
             done,
             failed,
@@ -98,6 +111,13 @@ impl FakeSource {
         let (format, samples) = read_wav(path)?;
         let name = format!("file {}", path.display());
         Ok(Self::start(name, format, samples, pace, None))
+    }
+
+    /// Play a WAV file over and over until stopped (soak runs).
+    pub fn from_wav_looping(path: &Path, pace: Pace) -> Result<Self, CaptureError> {
+        let (format, samples) = read_wav(path)?;
+        let name = format!("file {}", path.display());
+        Ok(Self::spawn(name, format, samples, pace, None, true))
     }
 }
 

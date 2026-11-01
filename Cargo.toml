@@ -45,6 +45,14 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 
+# Optimized like a release, with the debug-build switches (`app/src-tauri/src/dev.rs`) on:
+# soak runs measure release code with fake input.
+[profile.soak]
+inherits = "release"
+debug-assertions = true
+lto = "thin"
+codegen-units = 16
+
 [profile.bench-release]
 inherits = "release"
 strip = "none"

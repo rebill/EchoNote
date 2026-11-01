@@ -270,7 +270,93 @@ async function checkRetranscribe(meeting: number): Promise<Record<string, unknow
   return result;
 }
 
+/// The next frame, or after 1 s when the window is hidden and WebKit paused frames.
+function frame(): Promise<{ at: number; painted: boolean }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ at: performance.now(), painted: false }), 1_000);
+    requestAnimationFrame((at) => {
+      clearTimeout(timer);
+      resolve({ at, painted: true });
+    });
+  });
+}
+
+/// Frame gaps while the list in `selector` scrolls from top to bottom in 60 steps, then
+/// back to where it was. `painted` is false when the window was hidden (no frames to time).
+async function scrollFrames(
+  selector: string,
+): Promise<{ rows: number; p95Ms: number; maxMs: number; painted: boolean } | null> {
+  const viewport = document.querySelector<HTMLElement>(selector);
+  if (!viewport) return null;
+  const back = viewport.scrollTop;
+  const range = viewport.scrollHeight - viewport.clientHeight;
+  const gaps: number[] = [];
+  let last = await frame();
+  let painted = last.painted;
+  for (let step = 0; step <= 60 && painted; step++) {
+    viewport.scrollTop = (range * step) / 60;
+    const now = await frame();
+    painted = now.painted;
+    gaps.push(now.at - last.at);
+    last = now;
+  }
+  viewport.scrollTop = back;
+  gaps.sort((a, b) => a - b);
+  return {
+    rows: viewport.querySelectorAll(".row").length,
+    p95Ms: gaps.length ? Math.round(gaps[Math.floor(gaps.length * 0.95)]! * 10) / 10 : 0,
+    maxMs: gaps.length ? Math.round(gaps.at(-1)! * 10) / 10 : 0,
+    painted,
+  };
+}
+
+/// PRD A6 (`scripts/dev/soak.sh`): record the looping fake input for `seconds`, scrolling the
+/// live list every minute; then stop, time until everything is stored, and scroll the saved
+/// transcript. Memory is sampled from outside by the script.
+async function soak(seconds: number): Promise<Record<string, unknown>> {
+  const report: Record<string, unknown> = { startedAt: new Date().toISOString(), seconds };
+  const samples: { minute: number; segments: number; rows: number; p95Ms: number; maxMs: number; painted: boolean }[] =
+    [];
+  try {
+    await api.startRecording();
+    await until(() => app.view.name === "live" && (app.live?.segments.length ?? 0) > 0, 120_000);
+    const started = performance.now();
+    while (performance.now() - started < seconds * 1000) {
+      await sleep(Math.min(60_000, seconds * 1000 - (performance.now() - started)));
+      const frames = await scrollFrames(".live .viewport");
+      const minute = Math.round((performance.now() - started) / 60_000);
+      if (frames) samples.push({ minute, segments: app.live?.segments.length ?? 0, ...frames });
+    }
+    report.live = samples;
+    report.visibility = document.visibilityState;
+    report.segmentsAtStop = app.live?.segments.length ?? 0;
+    const stopping = performance.now();
+    await api.stopRecording();
+    report.stopToStoredMs = Math.round(performance.now() - stopping);
+    report.finished = await until(() => app.view.name === "meeting", 60_000);
+    const meeting = app.live?.meeting ?? null;
+    if (meeting != null) {
+      const detail = await api.getMeeting(meeting);
+      report.segments = detail.segments.length;
+      report.status = detail.meeting.status;
+      report.tracks = detail.tracks.map((track) => ({ kind: track.kind, durationMs: track.durationMs }));
+      await until(() => !!document.querySelector(".detail .viewport .row"), 10_000);
+      report.detailScroll = await scrollFrames(".detail .viewport");
+    }
+    report.finishedStats = app.live?.finished ?? null;
+  } catch (error) {
+    report.error = asCommandError(error);
+  }
+  report.cspViolations = [...cspViolations];
+  return report;
+}
+
 export async function run(): Promise<void> {
+  const soakSeconds = app.info?.soakSeconds ?? null;
+  if (soakSeconds != null) {
+    await api.smokeReport(await soak(soakSeconds));
+    return;
+  }
   const report: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const deltaTimes: number[] = [];
   const unlisten = await events.live(() => deltaTimes.push(performance.now()));
