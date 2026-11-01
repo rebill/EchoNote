@@ -115,7 +115,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       # Deterministic synthetic fixtures with a fixed decode-cost model; see
       # crates/echonote-bench/src/gate.rs.

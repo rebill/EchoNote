@@ -296,12 +296,19 @@ fn rate_limits_and_server_errors_are_retried_with_backoff() {
         assert!(matches!(result, Err(LlmError::Server { status: 503, .. })));
         assert_eq!(server.requests().len(), 3);
 
-        // A refused connection is retried too, then reported.
+        // A refused connection is retried too, then reported. Windows retries the SYN for
+        // about 2 s before it reports a refusal, longer than the short test timeouts.
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/v1", closed.local_addr().unwrap());
         drop(closed);
-        let (result, _) = collect(&client(Api::OpenAi, base), &Cancel::new()).await;
-        assert!(matches!(result, Err(LlmError::Connect)));
+        let patient = Policy {
+            connect_timeout: Duration::from_secs(15),
+            idle_timeout: Duration::from_secs(15),
+            ..policy()
+        };
+        let client = Client::new(endpoint(Api::OpenAi, base), patient).unwrap();
+        let (result, _) = collect(&client, &Cancel::new()).await;
+        assert!(matches!(result, Err(LlmError::Connect)), "{result:?}");
     });
 }
 
